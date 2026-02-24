@@ -15,7 +15,7 @@ Console.WriteLine("TTWWorker — безопасная автоматизация
 Console.WriteLine("1) План публикаций");
 Console.WriteLine("2) Черновики описаний/хэштегов");
 Console.WriteLine("3) Метрики и отчёты");
-Console.WriteLine("4) Человеческий прогрев (с открытием браузера и ручной работой)");
+Console.WriteLine("4) Автопрогрев (только автоскролл, без лайков/комментов)");
 Console.Write("Выберите раздел (1-4): ");
 var section = Console.ReadLine();
 
@@ -121,7 +121,7 @@ static void RunMetrics(MetricsService metricsService, ReportService reportServic
 
 static async Task RunEngagement(EngagementAssistant engagementAssistant, EngagementSessionCoach engagementCoach, BotWarmupRunner botWarmupRunner)
 {
-    Console.WriteLine("\nРежим прогрева (автозапуск по плану):");
+    Console.WriteLine("\nРежим прогрева (автоскролл без взаимодействий):");
     Console.WriteLine("Можно остановить в любую секунду клавишей S (англ.).");
     Console.Write("Минут сессии: ");
     var minutes = ReadIntFromConsole();
@@ -135,6 +135,7 @@ static async Task RunEngagement(EngagementAssistant engagementAssistant, Engagem
         Console.WriteLine($"- {step}");
     }
 
+    Console.WriteLine("\nВнимание: режим выполняет только автоскролл/переходы страниц без интеракций.");
     Console.WriteLine("\nАвтовыполнение шагов стартует через 3 секунды...");
     await Task.Delay(3000);
 
@@ -175,9 +176,10 @@ static async Task RunEngagement(EngagementAssistant engagementAssistant, Engagem
     }
 
     Console.WriteLine("\nЗафиксируйте факт выполнения:");
-    var watched = ReadInt("Сколько роликов обработано: ");
-    var likes = ReadInt("Сколько лайков выполнено: ");
-    var comments = ReadInt("Сколько комментариев отправлено: ");
+    var watched = ReadInt("Сколько роликов просмотрено (оценка): ");
+    var likes = 0;
+    var comments = 0;
+    Console.WriteLine("Лайки/комментарии в этом режиме отключены и всегда = 0.");
     Console.Write("Заметка: ");
     var notes = Console.ReadLine() ?? string.Empty;
 

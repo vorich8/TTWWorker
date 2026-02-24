@@ -33,9 +33,9 @@ public class EngagementSessionCoach(JsonStorage storage)
         return
         [
             $"Блок 1 ({block1} мин): спокойно смотрите релевантные ролики до конца.",
-            $"Блок 2 ({block2} мин): точечно лайкните релевантные видео (1-3 шт).",
-            $"Блок 3 ({block3} мин): оставьте 1 содержательный комментарий по теме.",
-            $"Блок 4 ({block4} мин): проверьте уведомления и ответьте подписчикам."
+            $"Блок 2 ({block2} мин): автоскролл ленты рекомендаций без взаимодействий.",
+            $"Блок 3 ({block3} мин): продолжайте просмотр релевантной ленты.",
+            $"Блок 4 ({block4} мин): откройте уведомления и анализируйте отклик без действий."
         ];
     }
 
@@ -44,17 +44,17 @@ public class EngagementSessionCoach(JsonStorage storage)
     public IReadOnlyList<SessionStep> BuildAutoPlan(TimeSpan duration)
     {
         var total = Math.Max(8, (int)duration.TotalMinutes);
-        var watch = Math.Max(3, total / 3);
-        var like = Math.Max(2, total / 4);
-        var comment = Math.Max(2, total / 4);
-        var notifications = Math.Max(1, total - watch - like - comment);
+        var feedPassOne = Math.Max(3, total / 3);
+        var feedPassTwo = Math.Max(2, total / 3);
+        var discover = Math.Max(2, total / 5);
+        var notifications = Math.Max(1, total - feedPassOne - feedPassTwo - discover);
 
         return
         [
-            new SessionStep("Лента рекомендаций", watch, "Скролл и просмотр релевантных видео", "https://www.tiktok.com/foryou"),
-            new SessionStep("Взаимодействие", like, "Точечные лайки в рамках лимита", "https://www.tiktok.com/foryou"),
-            new SessionStep("Комментарии", comment, "Короткие комментарии по шаблонам", "https://www.tiktok.com/foryou"),
-            new SessionStep("Уведомления", notifications, "Ответы аудитории и проверка отклика", "https://www.tiktok.com/notifications")
+            new SessionStep("Лента рекомендаций — проход 1", feedPassOne, "Автоскролл ленты рекомендаций", "https://www.tiktok.com/foryou"),
+            new SessionStep("Лента рекомендаций — проход 2", feedPassTwo, "Автоскролл без лайков и комментариев", "https://www.tiktok.com/foryou"),
+            new SessionStep("Раздел интересов", discover, "Переход по рекомендациям и просмотр", "https://www.tiktok.com/explore"),
+            new SessionStep("Уведомления", notifications, "Просмотр входящих уведомлений без отправки действий", "https://www.tiktok.com/notifications")
         ];
     }
     public void SaveSession(EngagementSessionLog log)
