@@ -2,6 +2,4 @@
 Console.WriteLine("PIZDA");
 Console.WriteLine("PIZDA");
 Console.WriteLine("PIZDA");
-Console.WriteLine("PIZDA");
-Console.WriteLine("PIZDA");
-Console.WriteLine("PIZDA");
+
