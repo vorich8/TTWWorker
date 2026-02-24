@@ -34,6 +34,13 @@ public class JsonStorage
     public void SaveEngagementSessions(List<EngagementSessionLog> sessions)
         => Save("engagement-sessions.json", sessions);
 
+
+    public List<KeyboardProfile> LoadKeyboardProfiles()
+        => Load<List<KeyboardProfile>>("keyboard-profiles.json") ?? [];
+
+    public void SaveKeyboardProfiles(List<KeyboardProfile> profiles)
+        => Save("keyboard-profiles.json", profiles);
+
     public string SaveReport(string content)
     {
         var fileName = $"weekly-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.md";

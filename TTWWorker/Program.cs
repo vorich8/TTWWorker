@@ -9,32 +9,182 @@ var metricsService = new MetricsService(storage);
 var reportService = new ReportService(metricsService, planner, storage);
 var keyboardWarmupRunner = new KeyboardWarmupRunner();
 var engagementCoach = new EngagementSessionCoach(storage);
+var keyboardProfileService = new KeyboardProfileService(storage);
 
 Console.WriteLine("TTWWorker — автоматизация контент-операций");
 Console.WriteLine("1) План публикаций");
 Console.WriteLine("2) Черновики описаний/хэштегов");
 Console.WriteLine("3) Метрики и отчёты");
-Console.WriteLine("4) Сессия TikTok по таймеру (Down/L)");
+Console.WriteLine("4) Кликер-профили и запуск");
 Console.Write("Выберите раздел (1-4): ");
 var section = Console.ReadLine();
 
 switch (section)
 {
-    case "1":
-        RunPlanning(planner);
-        break;
-    case "2":
-        RunDrafts(draftGenerator);
-        break;
-    case "3":
-        RunMetrics(metricsService, reportService);
-        break;
-    case "4":
-        RunTimedKeyboardWarmup(keyboardWarmupRunner, engagementCoach).GetAwaiter().GetResult();
-        break;
-    default:
-        Console.WriteLine("Неизвестный раздел.");
-        break;
+    case "1": RunPlanning(planner); break;
+    case "2": RunDrafts(draftGenerator); break;
+    case "3": RunMetrics(metricsService, reportService); break;
+    case "4": RunClickerProfiles(keyboardProfileService, keyboardWarmupRunner, engagementCoach).GetAwaiter().GetResult(); break;
+    default: Console.WriteLine("Неизвестный раздел."); break;
+}
+
+static async Task RunClickerProfiles(KeyboardProfileService profileService, KeyboardWarmupRunner runner, EngagementSessionCoach coach)
+{
+    Console.WriteLine("\nПрофили кликера:");
+    Console.WriteLine("1) Запустить профиль");
+    Console.WriteLine("2) Добавить профиль");
+    Console.WriteLine("3) Редактировать профиль");
+    Console.WriteLine("4) Список профилей");
+    Console.Write("Действие: ");
+    var action = Console.ReadLine();
+
+    switch (action)
+    {
+        case "1": await RunProfile(profileService, runner, coach); break;
+        case "2": SaveProfile(profileService, null); break;
+        case "3":
+            var existing = PickProfile(profileService);
+            if (existing is not null) SaveProfile(profileService, existing);
+            break;
+        case "4": PrintProfiles(profileService.GetAll()); break;
+        default: Console.WriteLine("Неизвестное действие."); break;
+    }
+}
+
+static async Task RunProfile(KeyboardProfileService profileService, KeyboardWarmupRunner runner, EngagementSessionCoach coach)
+{
+    var profile = PickProfile(profileService);
+    if (profile is null) return;
+
+    Console.Write($"Минуты работы (Enter={profile.DefaultMinutes}): ");
+    var raw = Console.ReadLine();
+    var minutes = int.TryParse(raw, out var m) && m > 0 ? m : profile.DefaultMinutes;
+
+    using var cts = new CancellationTokenSource();
+    var stopListener = Task.Run(async () =>
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            if (Console.KeyAvailable && Console.ReadKey(intercept: true).Key == ConsoleKey.S)
+            {
+                Console.WriteLine($"[{DateTime.Now:T}] [BOT] STOP от пользователя.");
+                cts.Cancel();
+                break;
+            }
+
+            await Task.Delay(100);
+        }
+    });
+
+    try
+    {
+        await runner.RunAsync(profile, minutes, cts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия остановлена пользователем.");
+    }
+    finally
+    {
+        cts.Cancel();
+        await stopListener;
+    }
+
+    Console.Write("Заметка по сессии: ");
+    var notes = Console.ReadLine() ?? string.Empty;
+    coach.SaveSession(new EngagementSessionLog(DateTime.UtcNow, minutes, 0, 0, 0, notes));
+}
+
+static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source)
+{
+    var model = source ?? service.CreateDefault();
+
+    Console.Write($"Имя профиля (Enter={model.Name}): ");
+    var name = ReadOrDefault(model.Name);
+
+    var downMin = ReadIntWithDefault($"Down min сек (Enter={model.DownMinIntervalSeconds}): ", model.DownMinIntervalSeconds);
+    var downMax = ReadIntWithDefault($"Down max сек (Enter={model.DownMaxIntervalSeconds}): ", model.DownMaxIntervalSeconds);
+    var altTabSec = ReadIntWithDefault($"Alt+Tab интервал сек (Enter={model.AltTabIntervalSeconds}): ", model.AltTabIntervalSeconds);
+    var defaultMinutes = ReadIntWithDefault($"Минуты по умолчанию (Enter={model.DefaultMinutes}): ", model.DefaultMinutes);
+
+    var points = EditPoints(model.AltTabClickPoints);
+
+    var profile = new KeyboardProfile(
+        model.Id,
+        name,
+        Math.Max(1, downMin),
+        Math.Max(downMin, downMax),
+        Math.Max(1, altTabSec),
+        Math.Max(1, defaultMinutes),
+        points);
+
+    service.CreateOrUpdate(profile);
+    Console.WriteLine("Профиль сохранён.");
+}
+
+static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source)
+{
+    var points = source.ToList();
+    Console.WriteLine("Настройка пикселей для клика ЛКМ после Alt+Tab.");
+    Console.WriteLine("Сколько точек хранить в профиле? (каждый Alt+Tab использует следующую точку по кругу)");
+    Console.Write($"Enter={Math.Max(1, points.Count)}: ");
+
+    var count = int.TryParse(Console.ReadLine(), out var c) && c > 0 ? c : Math.Max(1, points.Count);
+    var result = new List<PixelClickPoint>();
+
+    for (var i = 0; i < count; i++)
+    {
+        var current = i < points.Count ? points[i] : new PixelClickPoint(960, 540, 4);
+        Console.WriteLine($"Точка #{i + 1}:");
+        var x = ReadIntWithDefault($"  X (Enter={current.X}): ", current.X);
+        var y = ReadIntWithDefault($"  Y (Enter={current.Y}): ", current.Y);
+        var clicks = ReadIntWithDefault($"  ClickCount (Enter={current.ClickCount}, рекомендовано 4): ", current.ClickCount);
+        result.Add(new PixelClickPoint(x, y, Math.Max(1, clicks)));
+    }
+
+    return result;
+}
+
+static KeyboardProfile? PickProfile(KeyboardProfileService service)
+{
+    var profiles = service.GetAll().ToList();
+    PrintProfiles(profiles);
+    Console.Write("Выберите индекс профиля: ");
+    if (!int.TryParse(Console.ReadLine(), out var idx) || idx < 1 || idx > profiles.Count)
+    {
+        Console.WriteLine("Неверный индекс.");
+        return null;
+    }
+
+    return profiles[idx - 1];
+}
+
+static void PrintProfiles(IReadOnlyList<KeyboardProfile> profiles)
+{
+    if (profiles.Count == 0)
+    {
+        Console.WriteLine("Профилей нет.");
+        return;
+    }
+
+    for (var i = 0; i < profiles.Count; i++)
+    {
+        var p = profiles[i];
+        Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {p.AltTabIntervalSeconds}s | points={p.AltTabClickPoints.Count}");
+    }
+}
+
+static string ReadOrDefault(string fallback)
+{
+    var raw = Console.ReadLine();
+    return string.IsNullOrWhiteSpace(raw) ? fallback : raw.Trim();
+}
+
+static int ReadIntWithDefault(string label, int fallback)
+{
+    Console.Write(label);
+    var raw = Console.ReadLine();
+    return int.TryParse(raw, out var value) ? value : fallback;
 }
 
 static void RunPlanning(PublicationPlanner planner)
@@ -118,66 +268,6 @@ static void RunMetrics(MetricsService metricsService, ReportService reportServic
     }
 }
 
-static async Task RunTimedKeyboardWarmup(KeyboardWarmupRunner runner, EngagementSessionCoach coach)
-{
-    Console.WriteLine("\nРежим таймера TikTok: открытие TikTok и нажатия Down/L по минутам.");
-    Console.WriteLine("STOP: нажмите клавишу S в любой момент.");
-    Console.Write("Сколько минут работать: ");
-
-    var minutes = ReadIntFromConsole();
-    if (minutes <= 0)
-    {
-        minutes = 10;
-    }
-
-    using var cts = new CancellationTokenSource();
-    var stopListener = Task.Run(async () =>
-    {
-        while (!cts.IsCancellationRequested)
-        {
-            if (Console.KeyAvailable)
-            {
-                var key = Console.ReadKey(intercept: true);
-                if (key.Key == ConsoleKey.S)
-                {
-                    Console.WriteLine($"[{DateTime.Now:T}] [BOT] STOP от пользователя.");
-                    cts.Cancel();
-                    break;
-                }
-            }
-
-            await Task.Delay(100);
-        }
-    });
-
-    try
-    {
-        await runner.RunAsync(minutes, cts.Token);
-    }
-    catch (OperationCanceledException)
-    {
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия остановлена пользователем.");
-    }
-    finally
-    {
-        cts.Cancel();
-        await stopListener;
-    }
-
-    Console.Write("Заметка по сессии: ");
-    var notes = Console.ReadLine() ?? string.Empty;
-
-    coach.SaveSession(new EngagementSessionLog(
-        StartedAt: DateTime.UtcNow,
-        PlannedMinutes: minutes,
-        WatchedVideos: 0,
-        ManualLikes: 0,
-        ManualComments: 0,
-        Notes: notes));
-
-    Console.WriteLine("Сессия сохранена.");
-}
-
 static int ReadInt(string label)
 {
     Console.Write(label);
@@ -188,9 +278,4 @@ static double ReadDouble(string label)
 {
     Console.Write(label);
     return double.TryParse(Console.ReadLine(), out var value) ? value : 0;
-}
-
-static int ReadIntFromConsole()
-{
-    return int.TryParse(Console.ReadLine(), out var value) ? value : 0;
 }
