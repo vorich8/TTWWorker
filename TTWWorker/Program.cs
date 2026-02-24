@@ -9,6 +9,7 @@ var metricsService = new MetricsService(storage);
 var reportService = new ReportService(metricsService, planner, storage);
 var engagementAssistant = new EngagementAssistant();
 var engagementCoach = new EngagementSessionCoach(storage);
+var botWarmupRunner = new BotWarmupRunner();
 
 Console.WriteLine("TTWWorker — безопасная автоматизация контент-операций");
 Console.WriteLine("1) План публикаций");
@@ -30,7 +31,7 @@ switch (section)
         RunMetrics(metricsService, reportService);
         break;
     case "4":
-        RunEngagement(engagementAssistant, engagementCoach);
+        RunEngagement(engagementAssistant, engagementCoach, botWarmupRunner).GetAwaiter().GetResult();
         break;
     default:
         Console.WriteLine("Неизвестный раздел.");
@@ -118,21 +119,13 @@ static void RunMetrics(MetricsService metricsService, ReportService reportServic
     }
 }
 
-static void RunEngagement(EngagementAssistant engagementAssistant, EngagementSessionCoach engagementCoach)
+static async Task RunEngagement(EngagementAssistant engagementAssistant, EngagementSessionCoach engagementCoach, BotWarmupRunner botWarmupRunner)
 {
-    Console.WriteLine("\nРежим прогрева (человек в контуре):");
-    Console.WriteLine("Приложение может открыть TikTok в браузере, но все действия выполняются только вручную.");
+    Console.WriteLine("\nРежим прогрева (автозапуск по плану):");
+    Console.WriteLine("Можно остановить в любую секунду клавишей S (англ.).");
     Console.Write("Минут сессии: ");
     var minutes = ReadIntFromConsole();
-    var duration = TimeSpan.FromMinutes(minutes <= 0 ? 15 : minutes);
-
-    Console.Write("Открыть TikTok в браузере сейчас? (y/n): ");
-    var shouldOpen = (Console.ReadLine() ?? "n").Equals("y", StringComparison.OrdinalIgnoreCase);
-    if (shouldOpen)
-    {
-        var opened = engagementCoach.OpenTikTokInBrowser();
-        Console.WriteLine(opened ? "Браузер открыт." : "Не удалось открыть браузер автоматически.");
-    }
+    var duration = TimeSpan.FromMinutes(minutes <= 0 ? 12 : minutes);
 
     Console.WriteLine("\nВаш план сессии:");
     var checklist = engagementAssistant.BuildChecklist(duration)
@@ -142,11 +135,50 @@ static void RunEngagement(EngagementAssistant engagementAssistant, EngagementSes
         Console.WriteLine($"- {step}");
     }
 
-    Console.WriteLine("\nПосле ручной сессии заполните итог:");
-    var watched = ReadInt("Сколько роликов просмотрено: ");
-    var likes = ReadInt("Сколько лайков поставлено вручную: ");
-    var comments = ReadInt("Сколько комментариев оставлено вручную: ");
-    Console.Write("Короткая заметка (что зашло аудитории): ");
+    Console.WriteLine("\nАвтовыполнение шагов стартует через 3 секунды...");
+    await Task.Delay(3000);
+
+    using var cts = new CancellationTokenSource();
+    var stopListener = Task.Run(async () =>
+    {
+        while (!cts.IsCancellationRequested)
+        {
+            if (Console.KeyAvailable)
+            {
+                var key = Console.ReadKey(intercept: true);
+                if (key.Key == ConsoleKey.S)
+                {
+                    Console.WriteLine($"[{DateTime.Now:T}] [BOT] Получен STOP-сигнал пользователя.");
+                    cts.Cancel();
+                    break;
+                }
+            }
+
+            await Task.Delay(100);
+        }
+    });
+
+    var autoPlan = engagementCoach.BuildAutoPlan(duration);
+
+    try
+    {
+        await botWarmupRunner.RunAsync(autoPlan, cts.Token);
+    }
+    catch (OperationCanceledException)
+    {
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия остановлена пользователем.");
+    }
+    finally
+    {
+        cts.Cancel();
+        await stopListener;
+    }
+
+    Console.WriteLine("\nЗафиксируйте факт выполнения:");
+    var watched = ReadInt("Сколько роликов обработано: ");
+    var likes = ReadInt("Сколько лайков выполнено: ");
+    var comments = ReadInt("Сколько комментариев отправлено: ");
+    Console.Write("Заметка: ");
     var notes = Console.ReadLine() ?? string.Empty;
 
     engagementCoach.SaveSession(new EngagementSessionLog(

@@ -24,18 +24,39 @@ public class EngagementSessionCoach(JsonStorage storage)
 
     public IReadOnlyList<string> BuildLowEffortPlan(TimeSpan duration)
     {
-        var minutes = Math.Max(5, (int)duration.TotalMinutes);
-        var block = Math.Max(2, minutes / 4);
+        var minutes = Math.Max(8, (int)duration.TotalMinutes);
+        var block1 = Math.Max(2, minutes / 4);
+        var block2 = Math.Max(2, minutes / 4);
+        var block3 = Math.Max(2, minutes / 4);
+        var block4 = Math.Max(1, minutes - block1 - block2 - block3);
 
         return
         [
-            $"Блок 1 ({block} мин): спокойно смотрите релевантные ролики до конца.",
-            $"Блок 2 ({block} мин): вручную лайкните только действительно понравившиеся видео (1-3 шт).",
-            $"Блок 3 ({block} мин): вручную оставьте 1 содержательный комментарий по теме.",
-            $"Блок 4 ({minutes - (block * 3)} мин): проверьте уведомления и ответьте подписчикам."
+            $"Блок 1 ({block1} мин): спокойно смотрите релевантные ролики до конца.",
+            $"Блок 2 ({block2} мин): точечно лайкните релевантные видео (1-3 шт).",
+            $"Блок 3 ({block3} мин): оставьте 1 содержательный комментарий по теме.",
+            $"Блок 4 ({block4} мин): проверьте уведомления и ответьте подписчикам."
         ];
     }
 
+
+
+    public IReadOnlyList<SessionStep> BuildAutoPlan(TimeSpan duration)
+    {
+        var total = Math.Max(8, (int)duration.TotalMinutes);
+        var watch = Math.Max(3, total / 3);
+        var like = Math.Max(2, total / 4);
+        var comment = Math.Max(2, total / 4);
+        var notifications = Math.Max(1, total - watch - like - comment);
+
+        return
+        [
+            new SessionStep("Лента рекомендаций", watch, "Скролл и просмотр релевантных видео", "https://www.tiktok.com/foryou"),
+            new SessionStep("Взаимодействие", like, "Точечные лайки в рамках лимита", "https://www.tiktok.com/foryou"),
+            new SessionStep("Комментарии", comment, "Короткие комментарии по шаблонам", "https://www.tiktok.com/foryou"),
+            new SessionStep("Уведомления", notifications, "Ответы аудитории и проверка отклика", "https://www.tiktok.com/notifications")
+        ];
+    }
     public void SaveSession(EngagementSessionLog log)
     {
         var sessions = storage.LoadEngagementSessions();
