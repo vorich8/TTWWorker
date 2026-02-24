@@ -137,15 +137,17 @@ static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source, P
     {
         var current = i < points.Count ? points[i] : new PixelClickPoint(960, 540, 4);
         Console.WriteLine($"Точка #{i + 1}:");
-        Console.WriteLine("  Переместите мышку в нужную точку и нажмите Enter для захвата координат.");
-        Console.ReadLine();
+        Console.WriteLine("  Переместите мышку в нужную точку.");
+        Console.WriteLine("  Лайв-режим координат запущен: нажмите Enter для фиксации точки.");
 
-        var captured = pointerService.CaptureCurrentPosition();
+        var liveCaptured = CapturePointWithLivePreview(pointerService, current.X, current.Y);
+        var captured = pointerService.CaptureCurrentPosition() ?? liveCaptured;
+
         var xDefault = captured?.X ?? current.X;
         var yDefault = captured?.Y ?? current.Y;
 
         Console.WriteLine(captured is null
-            ? "  Координаты не удалось прочитать автоматически, используем ручной ввод."
+            ? "  Координаты не удалось захватить автоматически, используем ручной ввод."
             : $"  Захвачено: X={xDefault}, Y={yDefault}");
 
         var x = ReadIntWithDefault($"  X (Enter={xDefault}): ", xDefault);
@@ -189,6 +191,35 @@ static void PrintProfiles(IReadOnlyList<KeyboardProfile> profiles)
     {
         var p = profiles[i];
         Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {p.AltTabIntervalSeconds}s | points={p.AltTabClickPoints.Count}");
+    }
+}
+
+static (int X, int Y)? CapturePointWithLivePreview(PointerService pointerService, int fallbackX, int fallbackY)
+{
+    var last = pointerService.CaptureCurrentPosition() ?? (fallbackX, fallbackY);
+    Console.WriteLine("  Нажмите Enter для фиксации текущей позиции мыши.");
+
+    while (true)
+    {
+        var current = pointerService.CaptureCurrentPosition();
+        if (current.HasValue)
+        {
+            last = current.Value;
+        }
+
+        Console.Write($"\r  Live X={last.Item1}, Y={last.Item2}      ");
+
+        if (Console.KeyAvailable)
+        {
+            var key = Console.ReadKey(intercept: true);
+            if (key.Key == ConsoleKey.Enter)
+            {
+                Console.WriteLine();
+                return (last.Item1, last.Item2);
+            }
+        }
+
+        Thread.Sleep(80);
     }
 }
 
