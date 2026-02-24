@@ -9,77 +9,110 @@ public class KeyboardWarmupRunner
     public async Task RunAsync(int minutes, CancellationToken cancellationToken)
     {
         minutes = Math.Max(1, minutes);
+        var totalSeconds = minutes * 60;
+
         OpenTikTok();
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] TikTok открыт. Длительность сессии: {minutes} мин.");
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Окно открыто. Длительность сессии: {minutes} мин ({totalSeconds} сек).");
 
+        // Down: каждые 7-20 секунд.
+        var nextDownAt = NextDownSecond(0);
+
+        // Alt+Tab: каждые 30 секунд.
+        var nextAltTabAt = 30;
+
+        // L: реже, но минимум 1 раз в каждом блоке 4 минут.
         var lUsedInCurrent4MinBlock = false;
+        var nextLAt = BuildLSecondForCurrentBlock(0, totalSeconds, forceByBlockEnd: false);
 
-        for (var minute = 1; minute <= minutes; minute++)
+        var downPressedAfterLastAltTab = false;
+
+        for (var sec = 1; sec <= totalSeconds; sec++)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            var minuteInBlock = ((minute - 1) % 4) + 1;
-            var mustPressLThisMinute = minuteInBlock == 4 && !lUsedInCurrent4MinBlock;
+            var currentBlockStart = ((sec - 1) / 240) * 240;
+            var currentBlockEnd = Math.Min(currentBlockStart + 240, totalSeconds);
 
-            var plan = BuildMinutePlan(mustPressLThisMinute);
-            lUsedInCurrent4MinBlock = lUsedInCurrent4MinBlock || plan.HasL;
-
-            Console.WriteLine($"[{DateTime.Now:T}] [BOT] Минута {minute}/{minutes}: AltTab=1, Down={plan.DownCount}, L={(plan.HasL ? 1 : 0)}");
-
-            for (var sec = 1; sec <= 60; sec++)
+            // Если подошли к концу 4-минутного блока без L — форсим L в оставшееся время.
+            if (!lUsedInCurrent4MinBlock && sec >= currentBlockEnd - 30 && (nextLAt < sec || nextLAt > currentBlockEnd))
             {
-                cancellationToken.ThrowIfCancellationRequested();
-
-                if (plan.AltTabSecond == sec)
-                {
-                    PressAltTab();
-                }
-
-                if (plan.DownSeconds.Contains(sec))
-                {
-                    PressDown();
-                }
-
-                if (plan.LSecond == sec)
-                {
-                    PressL();
-                }
-
-                await Task.Delay(1000, cancellationToken);
+                nextLAt = _random.Next(sec, currentBlockEnd + 1);
             }
 
-            if (minuteInBlock == 4)
+            if (sec == nextAltTabAt)
+            {
+                PressAltTab();
+                downPressedAfterLastAltTab = false;
+                nextAltTabAt += 30;
+            }
+
+            if (sec == nextDownAt)
+            {
+                PressDown();
+                downPressedAfterLastAltTab = true;
+                nextDownAt = NextDownSecond(sec);
+            }
+
+            if (sec == nextLAt)
+            {
+                PressL();
+                lUsedInCurrent4MinBlock = true;
+                nextLAt = BuildLSecondForCurrentBlock(sec, totalSeconds, forceByBlockEnd: false);
+            }
+
+            // Гарантия: после Alt+Tab до следующего Alt+Tab должен быть минимум один Down.
+            if (!downPressedAfterLastAltTab && sec == nextAltTabAt - 1)
+            {
+                PressDown();
+                downPressedAfterLastAltTab = true;
+                nextDownAt = NextDownSecond(sec);
+            }
+
+            if (sec % 240 == 0)
             {
                 lUsedInCurrent4MinBlock = false;
             }
+
+            if (sec % 30 == 0)
+            {
+                Console.WriteLine($"[{DateTime.Now:T}] [BOT] Прогресс: {sec}/{totalSeconds} сек");
+            }
+
+            await Task.Delay(1000, cancellationToken);
         }
 
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия завершена.");
     }
 
-    private MinutePlan BuildMinutePlan(bool mustPressL)
+    private int NextDownSecond(int currentSecond)
     {
-        var downCount = _random.Next(0, 4); // 0..3
-        var downSeconds = new HashSet<int>();
+        var offset = _random.Next(7, 21); // 7-20
+        return currentSecond + offset;
+    }
 
-        while (downSeconds.Count < downCount)
+    private int BuildLSecondForCurrentBlock(int currentSecond, int totalSeconds, bool forceByBlockEnd)
+    {
+        var blockStart = (currentSecond / 240) * 240;
+        var blockEnd = Math.Min(blockStart + 240, totalSeconds);
+
+        if (blockEnd <= currentSecond)
         {
-            downSeconds.Add(_random.Next(1, 61));
+            return int.MaxValue;
         }
 
-        if (downSeconds.Count == 0)
+        if (forceByBlockEnd)
         {
-            downSeconds.Add(60); // обязательное нажатие если за минуту не было
+            return _random.Next(currentSecond + 1, blockEnd + 1);
         }
 
-        // L реже: базово ~15% минут, но принудительно в 4-й минуте блока, если до этого не было.
-        var hasL = mustPressL || _random.NextDouble() < 0.15;
-        var lSecond = hasL ? _random.Next(1, 61) : -1;
+        // Реже: ~10% вероятность в блоке на старте, иначе ждем возможного форса ближе к концу.
+        var shouldPress = _random.NextDouble() < 0.10;
+        if (!shouldPress)
+        {
+            return int.MaxValue;
+        }
 
-        // Alt+Tab ровно один раз в минуту, обязательно.
-        var altTabSecond = _random.Next(1, 61);
-
-        return new MinutePlan(downSeconds, downSeconds.Count, hasL, lSecond, altTabSecond);
+        return _random.Next(currentSecond + 1, blockEnd + 1);
     }
 
     private void OpenTikTok()
@@ -188,6 +221,4 @@ public class KeyboardWarmupRunner
 
         return false;
     }
-
-    private sealed record MinutePlan(HashSet<int> DownSeconds, int DownCount, bool HasL, int LSecond, int AltTabSecond);
 }
