@@ -27,6 +27,13 @@ public class JsonStorage
     public void SaveMetrics(List<MetricsSnapshot> metrics)
         => Save("metrics.json", metrics);
 
+
+    public List<EngagementSessionLog> LoadEngagementSessions()
+        => Load<List<EngagementSessionLog>>("engagement-sessions.json") ?? [];
+
+    public void SaveEngagementSessions(List<EngagementSessionLog> sessions)
+        => Save("engagement-sessions.json", sessions);
+
     public string SaveReport(string content)
     {
         var fileName = $"weekly-report-{DateTime.UtcNow:yyyyMMdd-HHmmss}.md";

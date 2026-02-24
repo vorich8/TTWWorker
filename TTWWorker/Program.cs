@@ -8,12 +8,13 @@ var draftGenerator = new DraftGenerator();
 var metricsService = new MetricsService(storage);
 var reportService = new ReportService(metricsService, planner, storage);
 var engagementAssistant = new EngagementAssistant();
+var engagementCoach = new EngagementSessionCoach(storage);
 
 Console.WriteLine("TTWWorker — безопасная автоматизация контент-операций");
 Console.WriteLine("1) План публикаций");
 Console.WriteLine("2) Черновики описаний/хэштегов");
 Console.WriteLine("3) Метрики и отчёты");
-Console.WriteLine("4) Человеческий прогрев (только подсказки, без автолайков/автокомментов)");
+Console.WriteLine("4) Человеческий прогрев (с открытием браузера и ручной работой)");
 Console.Write("Выберите раздел (1-4): ");
 var section = Console.ReadLine();
 
@@ -29,7 +30,7 @@ switch (section)
         RunMetrics(metricsService, reportService);
         break;
     case "4":
-        RunEngagement(engagementAssistant);
+        RunEngagement(engagementAssistant, engagementCoach);
         break;
     default:
         Console.WriteLine("Неизвестный раздел.");
@@ -117,17 +118,49 @@ static void RunMetrics(MetricsService metricsService, ReportService reportServic
     }
 }
 
-static void RunEngagement(EngagementAssistant engagementAssistant)
+static void RunEngagement(EngagementAssistant engagementAssistant, EngagementSessionCoach engagementCoach)
 {
-    Console.WriteLine("\nЧеловеческий прогрев (manual-only):");
-    Console.WriteLine("Этот режим не выполняет автолайки/автокомментарии и не управляет браузером.");
+    Console.WriteLine("\nРежим прогрева (человек в контуре):");
+    Console.WriteLine("Приложение может открыть TikTok в браузере, но все действия выполняются только вручную.");
     Console.Write("Минут сессии: ");
     var minutes = ReadIntFromConsole();
+    var duration = TimeSpan.FromMinutes(minutes <= 0 ? 15 : minutes);
 
-    var checklist = engagementAssistant.BuildChecklist(TimeSpan.FromMinutes(minutes <= 0 ? 15 : minutes));
+    Console.Write("Открыть TikTok в браузере сейчас? (y/n): ");
+    var shouldOpen = (Console.ReadLine() ?? "n").Equals("y", StringComparison.OrdinalIgnoreCase);
+    if (shouldOpen)
+    {
+        var opened = engagementCoach.OpenTikTokInBrowser();
+        Console.WriteLine(opened ? "Браузер открыт." : "Не удалось открыть браузер автоматически.");
+    }
+
+    Console.WriteLine("\nВаш план сессии:");
+    var checklist = engagementAssistant.BuildChecklist(duration)
+        .Concat(engagementCoach.BuildLowEffortPlan(duration));
     foreach (var step in checklist)
     {
         Console.WriteLine($"- {step}");
+    }
+
+    Console.WriteLine("\nПосле ручной сессии заполните итог:");
+    var watched = ReadInt("Сколько роликов просмотрено: ");
+    var likes = ReadInt("Сколько лайков поставлено вручную: ");
+    var comments = ReadInt("Сколько комментариев оставлено вручную: ");
+    Console.Write("Короткая заметка (что зашло аудитории): ");
+    var notes = Console.ReadLine() ?? string.Empty;
+
+    engagementCoach.SaveSession(new EngagementSessionLog(
+        DateTime.UtcNow,
+        (int)duration.TotalMinutes,
+        watched,
+        likes,
+        comments,
+        notes));
+
+    Console.WriteLine("Сессия сохранена. Последние сессии:");
+    foreach (var session in engagementCoach.GetRecentSessions(3))
+    {
+        Console.WriteLine($"- {session.StartedAt:g} | {session.PlannedMinutes} мин | видео {session.WatchedVideos} | лайки {session.ManualLikes} | комм {session.ManualComments}");
     }
 }
 
