@@ -16,7 +16,7 @@ Console.WriteLine("TTWWorker — автоматизация контент-оп�
 Console.WriteLine("1) План публикаций");
 Console.WriteLine("2) Черновики описаний/хэштегов");
 Console.WriteLine("3) Метрики и отчёты");
-Console.WriteLine("4) Кликер-профили и запуск");
+Console.WriteLine("4) Кликер-профили и запуск (Windows 11)");
 Console.Write("Выберите раздел (1-4): ");
 var section = Console.ReadLine();
 
@@ -31,7 +31,7 @@ switch (section)
 
 static async Task RunClickerProfiles(KeyboardProfileService profileService, KeyboardWarmupRunner runner, EngagementSessionCoach coach, PointerService pointerService)
 {
-    Console.WriteLine("\nПрофили кликера:");
+    Console.WriteLine("\nПрофили кликера (Windows 11):");
     Console.WriteLine("1) Запустить профиль");
     Console.WriteLine("2) Добавить профиль");
     Console.WriteLine("3) Редактировать профиль");

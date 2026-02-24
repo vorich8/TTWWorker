@@ -83,14 +83,14 @@ public class KeyboardWarmupRunner
     {
         Process.Start(new ProcessStartInfo
         {
-            FileName = "https://example.com",
+            FileName = "https://www.tiktok.com/foryou",
             UseShellExecute = true
         });
     }
 
     private void PressDown()
     {
-        var ok = SendKey("{DOWN}", "Down");
+        var ok = SendKey("{DOWN}");
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Key Down {(ok ? "sent" : "failed")}");
     }
 
@@ -100,124 +100,73 @@ public class KeyboardWarmupRunner
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Key Alt+Tab {(ok ? "sent" : "failed")}");
     }
 
-    private static bool SendKey(string windowsKey, string linuxKey)
+    private static bool SendKey(string windowsKey)
     {
+        if (!OperatingSystem.IsWindows()) return false;
+
         try
         {
-            if (OperatingSystem.IsWindows())
+            var psi = new ProcessStartInfo
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell",
-                    Arguments = $"-NoProfile -Command \"$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('{windowsKey}')\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(3000);
-                return process is { ExitCode: 0 };
-            }
-
-            if (OperatingSystem.IsLinux())
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "bash",
-                    Arguments = $"-lc \"xdotool key {linuxKey}\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(3000);
-                return process is { ExitCode: 0 };
-            }
+                FileName = "powershell",
+                Arguments = $"-NoProfile -Command \"$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('{windowsKey}')\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var process = Process.Start(psi);
+            process?.WaitForExit(3000);
+            return process is { ExitCode: 0 };
         }
         catch
         {
             return false;
         }
-
-        return false;
     }
 
     private static bool SendAltTab()
     {
+        if (!OperatingSystem.IsWindows()) return false;
+
         try
         {
-            if (OperatingSystem.IsWindows())
+            var psi = new ProcessStartInfo
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell",
-                    Arguments = "-NoProfile -Command \"$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('%{TAB}')\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(3000);
-                return process is { ExitCode: 0 };
-            }
-
-            if (OperatingSystem.IsLinux())
-            {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "bash",
-                    Arguments = "-lc \"xdotool key alt+Tab\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(3000);
-                return process is { ExitCode: 0 };
-            }
+                FileName = "powershell",
+                Arguments = "-NoProfile -Command \"$wshell = New-Object -ComObject wscript.shell; Start-Sleep -Milliseconds 50; $wshell.SendKeys('%{TAB}')\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var process = Process.Start(psi);
+            process?.WaitForExit(3000);
+            return process is { ExitCode: 0 };
         }
         catch
         {
             return false;
         }
-
-        return false;
     }
 
     private static bool SendLeftClick(int x, int y, int count)
     {
+        if (!OperatingSystem.IsWindows()) return false;
+
         try
         {
-            if (OperatingSystem.IsLinux())
+            var script = "$sig='[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int X,int Y);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint dwFlags,uint dx,uint dy,uint cButtons,UIntPtr dwExtraInfo);'; Add-Type -MemberDefinition $sig -Name Win -Namespace Native; [Native.Win]::SetCursorPos(" + x + "," + y + ") | Out-Null; 1.." + count + " | % { [Native.Win]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); [Native.Win]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }";
+            var psi = new ProcessStartInfo
             {
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "bash",
-                    Arguments = $"-lc \"xdotool mousemove {x} {y} click --repeat {count} 1\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(4000);
-                return process is { ExitCode: 0 };
-            }
-
-            if (OperatingSystem.IsWindows())
-            {
-                var script = "$sig='[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int X,int Y);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint dwFlags,uint dx,uint dy,uint cButtons,UIntPtr dwExtraInfo);'; Add-Type -MemberDefinition $sig -Name Win -Namespace Native; [Native.Win]::SetCursorPos(" + x + "," + y + ") | Out-Null; 1.." + count + " | % { [Native.Win]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); [Native.Win]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }";
-                var psi = new ProcessStartInfo
-                {
-                    FileName = "powershell",
-                    Arguments = $"-NoProfile -Command \"{script}\"",
-                    CreateNoWindow = true,
-                    UseShellExecute = false
-                };
-                using var process = Process.Start(psi);
-                process?.WaitForExit(4000);
-                return process is { ExitCode: 0 };
-            }
+                FileName = "powershell",
+                Arguments = $"-NoProfile -Command \"{script}\"",
+                CreateNoWindow = true,
+                UseShellExecute = false
+            };
+            using var process = Process.Start(psi);
+            process?.WaitForExit(4000);
+            return process is { ExitCode: 0 };
         }
         catch
         {
             return false;
         }
-
-        return false;
     }
 }
