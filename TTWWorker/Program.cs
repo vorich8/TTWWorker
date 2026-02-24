@@ -133,6 +133,13 @@ static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source, P
     var count = int.TryParse(Console.ReadLine(), out var c) && c > 0 ? c : Math.Max(1, points.Count);
     var result = new List<PixelClickPoint>();
 
+    var diagnostic = pointerService.GetCaptureDiagnostic();
+    if (!string.Equals(diagnostic, "ok", StringComparison.OrdinalIgnoreCase))
+    {
+        Console.WriteLine($"  Диагностика захвата курсора: {diagnostic}");
+        Console.WriteLine("  Можно ориентироваться по Live-координатам/ввести X,Y вручную.");
+    }
+
     for (var i = 0; i < count; i++)
     {
         var current = i < points.Count ? points[i] : new PixelClickPoint(960, 540, 4);
@@ -197,6 +204,7 @@ static void PrintProfiles(IReadOnlyList<KeyboardProfile> profiles)
 static (int X, int Y)? CapturePointWithLivePreview(PointerService pointerService, int fallbackX, int fallbackY)
 {
     var last = pointerService.CaptureCurrentPosition() ?? (fallbackX, fallbackY);
+    var unchangedTicks = 0;
     Console.WriteLine("  Нажмите Enter для фиксации текущей позиции мыши.");
 
     while (true)
@@ -204,10 +212,19 @@ static (int X, int Y)? CapturePointWithLivePreview(PointerService pointerService
         var current = pointerService.CaptureCurrentPosition();
         if (current.HasValue)
         {
-            last = current.Value;
+            if (current.Value.X == last.Item1 && current.Value.Y == last.Item2)
+            {
+                unchangedTicks++;
+            }
+            else
+            {
+                unchangedTicks = 0;
+                last = current.Value;
+            }
         }
 
-        Console.Write($"\r  Live X={last.Item1}, Y={last.Item2}      ");
+        var suffix = unchangedTicks > 40 ? " (координаты не меняются, при необходимости введите вручную)" : string.Empty;
+        Console.Write($"\r  Live X={last.Item1}, Y={last.Item2}{suffix}      ");
 
         if (Console.KeyAvailable)
         {
