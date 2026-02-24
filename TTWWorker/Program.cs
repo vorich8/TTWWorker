@@ -10,6 +10,7 @@ var reportService = new ReportService(metricsService, planner, storage);
 var keyboardWarmupRunner = new KeyboardWarmupRunner();
 var engagementCoach = new EngagementSessionCoach(storage);
 var keyboardProfileService = new KeyboardProfileService(storage);
+var pointerService = new PointerService();
 
 Console.WriteLine("TTWWorker — автоматизация контент-операций");
 Console.WriteLine("1) План публикаций");
@@ -24,11 +25,11 @@ switch (section)
     case "1": RunPlanning(planner); break;
     case "2": RunDrafts(draftGenerator); break;
     case "3": RunMetrics(metricsService, reportService); break;
-    case "4": RunClickerProfiles(keyboardProfileService, keyboardWarmupRunner, engagementCoach).GetAwaiter().GetResult(); break;
+    case "4": RunClickerProfiles(keyboardProfileService, keyboardWarmupRunner, engagementCoach, pointerService).GetAwaiter().GetResult(); break;
     default: Console.WriteLine("Неизвестный раздел."); break;
 }
 
-static async Task RunClickerProfiles(KeyboardProfileService profileService, KeyboardWarmupRunner runner, EngagementSessionCoach coach)
+static async Task RunClickerProfiles(KeyboardProfileService profileService, KeyboardWarmupRunner runner, EngagementSessionCoach coach, PointerService pointerService)
 {
     Console.WriteLine("\nПрофили кликера:");
     Console.WriteLine("1) Запустить профиль");
@@ -41,10 +42,10 @@ static async Task RunClickerProfiles(KeyboardProfileService profileService, Keyb
     switch (action)
     {
         case "1": await RunProfile(profileService, runner, coach); break;
-        case "2": SaveProfile(profileService, null); break;
+        case "2": SaveProfile(profileService, null, pointerService); break;
         case "3":
             var existing = PickProfile(profileService);
-            if (existing is not null) SaveProfile(profileService, existing);
+            if (existing is not null) SaveProfile(profileService, existing, pointerService);
             break;
         case "4": PrintProfiles(profileService.GetAll()); break;
         default: Console.WriteLine("Неизвестное действие."); break;
@@ -95,7 +96,7 @@ static async Task RunProfile(KeyboardProfileService profileService, KeyboardWarm
     coach.SaveSession(new EngagementSessionLog(DateTime.UtcNow, minutes, 0, 0, 0, notes));
 }
 
-static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source)
+static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source, PointerService pointerService)
 {
     var model = source ?? service.CreateDefault();
 
@@ -107,7 +108,7 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source)
     var altTabSec = ReadIntWithDefault($"Alt+Tab интервал сек (Enter={model.AltTabIntervalSeconds}): ", model.AltTabIntervalSeconds);
     var defaultMinutes = ReadIntWithDefault($"Минуты по умолчанию (Enter={model.DefaultMinutes}): ", model.DefaultMinutes);
 
-    var points = EditPoints(model.AltTabClickPoints);
+    var points = EditPoints(model.AltTabClickPoints, pointerService);
 
     var profile = new KeyboardProfile(
         model.Id,
@@ -122,7 +123,7 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source)
     Console.WriteLine("Профиль сохранён.");
 }
 
-static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source)
+static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source, PointerService pointerService)
 {
     var points = source.ToList();
     Console.WriteLine("Настройка пикселей для клика ЛКМ после Alt+Tab.");
@@ -136,9 +137,26 @@ static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source)
     {
         var current = i < points.Count ? points[i] : new PixelClickPoint(960, 540, 4);
         Console.WriteLine($"Точка #{i + 1}:");
-        var x = ReadIntWithDefault($"  X (Enter={current.X}): ", current.X);
-        var y = ReadIntWithDefault($"  Y (Enter={current.Y}): ", current.Y);
+        Console.WriteLine("  Переместите мышку в нужную точку и нажмите Enter для захвата координат.");
+        Console.ReadLine();
+
+        var captured = pointerService.CaptureCurrentPosition();
+        var xDefault = captured?.X ?? current.X;
+        var yDefault = captured?.Y ?? current.Y;
+
+        Console.WriteLine(captured is null
+            ? "  Координаты не удалось прочитать автоматически, используем ручной ввод."
+            : $"  Захвачено: X={xDefault}, Y={yDefault}");
+
+        var x = ReadIntWithDefault($"  X (Enter={xDefault}): ", xDefault);
+        var y = ReadIntWithDefault($"  Y (Enter={yDefault}): ", yDefault);
         var clicks = ReadIntWithDefault($"  ClickCount (Enter={current.ClickCount}, рекомендовано 4): ", current.ClickCount);
+
+        var moved = pointerService.MoveTo(x, y);
+        Console.WriteLine(moved
+            ? "  Проверка: курсор перемещён в сохранённую точку."
+            : "  Проверка: не удалось переместить курсор автоматически.");
+
         result.Add(new PixelClickPoint(x, y, Math.Max(1, clicks)));
     }
 
