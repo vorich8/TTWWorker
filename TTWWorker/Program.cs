@@ -7,15 +7,14 @@ var planner = new PublicationPlanner(storage);
 var draftGenerator = new DraftGenerator();
 var metricsService = new MetricsService(storage);
 var reportService = new ReportService(metricsService, planner, storage);
-var engagementAssistant = new EngagementAssistant();
+var keyboardWarmupRunner = new KeyboardWarmupRunner();
 var engagementCoach = new EngagementSessionCoach(storage);
-var botWarmupRunner = new BotWarmupRunner();
 
-Console.WriteLine("TTWWorker — безопасная автоматизация контент-операций");
+Console.WriteLine("TTWWorker — автоматизация контент-операций");
 Console.WriteLine("1) План публикаций");
 Console.WriteLine("2) Черновики описаний/хэштегов");
 Console.WriteLine("3) Метрики и отчёты");
-Console.WriteLine("4) Автопрогрев (только автоскролл, без лайков/комментов)");
+Console.WriteLine("4) Сессия TikTok по таймеру (Down/L)");
 Console.Write("Выберите раздел (1-4): ");
 var section = Console.ReadLine();
 
@@ -31,7 +30,7 @@ switch (section)
         RunMetrics(metricsService, reportService);
         break;
     case "4":
-        RunEngagement(engagementAssistant, engagementCoach, botWarmupRunner).GetAwaiter().GetResult();
+        RunTimedKeyboardWarmup(keyboardWarmupRunner, engagementCoach).GetAwaiter().GetResult();
         break;
     default:
         Console.WriteLine("Неизвестный раздел.");
@@ -119,25 +118,17 @@ static void RunMetrics(MetricsService metricsService, ReportService reportServic
     }
 }
 
-static async Task RunEngagement(EngagementAssistant engagementAssistant, EngagementSessionCoach engagementCoach, BotWarmupRunner botWarmupRunner)
+static async Task RunTimedKeyboardWarmup(KeyboardWarmupRunner runner, EngagementSessionCoach coach)
 {
-    Console.WriteLine("\nРежим прогрева (автоскролл без взаимодействий):");
-    Console.WriteLine("Можно остановить в любую секунду клавишей S (англ.).");
-    Console.Write("Минут сессии: ");
+    Console.WriteLine("\nРежим таймера TikTok: открытие TikTok и нажатия Down/L по минутам.");
+    Console.WriteLine("STOP: нажмите клавишу S в любой момент.");
+    Console.Write("Сколько минут работать: ");
+
     var minutes = ReadIntFromConsole();
-    var duration = TimeSpan.FromMinutes(minutes <= 0 ? 12 : minutes);
-
-    Console.WriteLine("\nВаш план сессии:");
-    var checklist = engagementAssistant.BuildChecklist(duration)
-        .Concat(engagementCoach.BuildLowEffortPlan(duration));
-    foreach (var step in checklist)
+    if (minutes <= 0)
     {
-        Console.WriteLine($"- {step}");
+        minutes = 10;
     }
-
-    Console.WriteLine("\nВнимание: режим выполняет только автоскролл/переходы страниц без интеракций.");
-    Console.WriteLine("\nАвтовыполнение шагов стартует через 3 секунды...");
-    await Task.Delay(3000);
 
     using var cts = new CancellationTokenSource();
     var stopListener = Task.Run(async () =>
@@ -149,7 +140,7 @@ static async Task RunEngagement(EngagementAssistant engagementAssistant, Engagem
                 var key = Console.ReadKey(intercept: true);
                 if (key.Key == ConsoleKey.S)
                 {
-                    Console.WriteLine($"[{DateTime.Now:T}] [BOT] Получен STOP-сигнал пользователя.");
+                    Console.WriteLine($"[{DateTime.Now:T}] [BOT] STOP от пользователя.");
                     cts.Cancel();
                     break;
                 }
@@ -159,11 +150,9 @@ static async Task RunEngagement(EngagementAssistant engagementAssistant, Engagem
         }
     });
 
-    var autoPlan = engagementCoach.BuildAutoPlan(duration);
-
     try
     {
-        await botWarmupRunner.RunAsync(autoPlan, cts.Token);
+        await runner.RunAsync(minutes, cts.Token);
     }
     catch (OperationCanceledException)
     {
@@ -175,27 +164,18 @@ static async Task RunEngagement(EngagementAssistant engagementAssistant, Engagem
         await stopListener;
     }
 
-    Console.WriteLine("\nЗафиксируйте факт выполнения:");
-    var watched = ReadInt("Сколько роликов просмотрено (оценка): ");
-    var likes = 0;
-    var comments = 0;
-    Console.WriteLine("Лайки/комментарии в этом режиме отключены и всегда = 0.");
-    Console.Write("Заметка: ");
+    Console.Write("Заметка по сессии: ");
     var notes = Console.ReadLine() ?? string.Empty;
 
-    engagementCoach.SaveSession(new EngagementSessionLog(
-        DateTime.UtcNow,
-        (int)duration.TotalMinutes,
-        watched,
-        likes,
-        comments,
-        notes));
+    coach.SaveSession(new EngagementSessionLog(
+        StartedAt: DateTime.UtcNow,
+        PlannedMinutes: minutes,
+        WatchedVideos: 0,
+        ManualLikes: 0,
+        ManualComments: 0,
+        Notes: notes));
 
-    Console.WriteLine("Сессия сохранена. Последние сессии:");
-    foreach (var session in engagementCoach.GetRecentSessions(3))
-    {
-        Console.WriteLine($"- {session.StartedAt:g} | {session.PlannedMinutes} мин | видео {session.WatchedVideos} | лайки {session.ManualLikes} | комм {session.ManualComments}");
-    }
+    Console.WriteLine("Сессия сохранена.");
 }
 
 static int ReadInt(string label)
