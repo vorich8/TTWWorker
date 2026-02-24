@@ -1,9 +1,28 @@
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 
 namespace TTWWorker.Services;
 
 public class PointerService
 {
+    [StructLayout(LayoutKind.Sequential)]
+    private struct POINT
+    {
+        public int X;
+        public int Y;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out POINT lpPoint);
+
+    [DllImport("user32.dll")]
+    private static extern bool SetCursorPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    private static extern void mouse_event(uint dwFlags, uint dx, uint dy, uint dwData, nint dwExtraInfo);
+
+    private const uint LeftDown = 0x0002;
+    private const uint LeftUp = 0x0004;
+
     public (int X, int Y)? CaptureCurrentPosition()
     {
         if (!OperatingSystem.IsWindows())
@@ -13,13 +32,8 @@ public class PointerService
 
         try
         {
-            var script = "$sig='[DllImport(\"user32.dll\")]public static extern bool GetCursorPos(out POINT lpPoint); public struct POINT{ public int X; public int Y; }'; Add-Type -MemberDefinition $sig -Name NativeWin -Namespace Native; $p=New-Object Native.NativeWin+POINT; [Native.NativeWin]::GetCursorPos([ref]$p) | Out-Null; Write-Output \"$($p.X),$($p.Y)\"";
-            var output = Run("powershell", $"-NoProfile -Command \"{script}\"", out var code);
-            if (code != 0) return null;
-
-            var parts = output.Trim().Split(',');
-            return parts.Length == 2 && int.TryParse(parts[0], out var x) && int.TryParse(parts[1], out var y)
-                ? (x, y)
+            return GetCursorPos(out var point)
+                ? (point.X, point.Y)
                 : null;
         }
         catch
@@ -35,15 +49,7 @@ public class PointerService
             return "Поддерживается только Windows 11";
         }
 
-        var output = Run("powershell", "-NoProfile -Command \"Write-Output ok\"", out var code, out var err);
-        if (code != 0)
-        {
-            return $"PowerShell недоступен: {err.Trim()}";
-        }
-
-        return output.Trim().Equals("ok", StringComparison.OrdinalIgnoreCase)
-            ? "ok"
-            : "PowerShell не вернул ожидаемый ответ";
+        return GetCursorPos(out _) ? "ok" : "GetCursorPos вернул false";
     }
 
     public bool MoveTo(int x, int y)
@@ -55,9 +61,7 @@ public class PointerService
 
         try
         {
-            var script = "$sig='[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int X,int Y);'; Add-Type -MemberDefinition $sig -Name NativeWin -Namespace Native; [Native.NativeWin]::SetCursorPos(" + x + "," + y + ") | Out-Null";
-            _ = Run("powershell", $"-NoProfile -Command \"{script}\"", out var code);
-            return code == 0;
+            return SetCursorPos(x, y);
         }
         catch
         {
@@ -65,26 +69,29 @@ public class PointerService
         }
     }
 
-    private static string Run(string fileName, string args, out int exitCode)
-        => Run(fileName, args, out exitCode, out _);
-
-    private static string Run(string fileName, string args, out int exitCode, out string stderr)
+    public bool LeftClick(int x, int y, int count)
     {
-        var psi = new ProcessStartInfo
+        if (!OperatingSystem.IsWindows())
         {
-            FileName = fileName,
-            Arguments = args,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false,
-            CreateNoWindow = true
-        };
+            return false;
+        }
 
-        using var process = Process.Start(psi);
-        var output = process?.StandardOutput.ReadToEnd() ?? string.Empty;
-        stderr = process?.StandardError.ReadToEnd() ?? string.Empty;
-        process?.WaitForExit(3000);
-        exitCode = process?.ExitCode ?? -1;
-        return output;
+        try
+        {
+            if (!SetCursorPos(x, y)) return false;
+
+            for (var i = 0; i < Math.Max(1, count); i++)
+            {
+                mouse_event(LeftDown, 0, 0, 0, 0);
+                mouse_event(LeftUp, 0, 0, 0, 0);
+                Thread.Sleep(60);
+            }
+
+            return true;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }

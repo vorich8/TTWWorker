@@ -6,6 +6,7 @@ namespace TTWWorker.Services;
 public class KeyboardWarmupRunner
 {
     private readonly Random _random = new();
+    private readonly PointerService _pointerService = new();
 
     public async Task RunAsync(KeyboardProfile profile, int minutes, CancellationToken cancellationToken)
     {
@@ -75,7 +76,7 @@ public class KeyboardWarmupRunner
         }
 
         var point = profile.AltTabClickPoints[(altTabCounter - 1) % profile.AltTabClickPoints.Count];
-        var ok = SendLeftClick(point.X, point.Y, Math.Max(1, point.ClickCount));
+        var ok = _pointerService.LeftClick(point.X, point.Y, Math.Max(1, point.ClickCount));
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Mouse click x={point.X} y={point.Y} count={point.ClickCount} {(ok ? "sent" : "failed")}");
     }
 
@@ -138,30 +139,6 @@ public class KeyboardWarmupRunner
             };
             using var process = Process.Start(psi);
             process?.WaitForExit(3000);
-            return process is { ExitCode: 0 };
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static bool SendLeftClick(int x, int y, int count)
-    {
-        if (!OperatingSystem.IsWindows()) return false;
-
-        try
-        {
-            var script = "$sig='[DllImport(\"user32.dll\")]public static extern bool SetCursorPos(int X,int Y);[DllImport(\"user32.dll\")]public static extern void mouse_event(uint dwFlags,uint dx,uint dy,uint cButtons,UIntPtr dwExtraInfo);'; Add-Type -MemberDefinition $sig -Name Win -Namespace Native; [Native.Win]::SetCursorPos(" + x + "," + y + ") | Out-Null; 1.." + count + " | % { [Native.Win]::mouse_event(0x0002,0,0,0,[UIntPtr]::Zero); [Native.Win]::mouse_event(0x0004,0,0,0,[UIntPtr]::Zero); Start-Sleep -Milliseconds 60 }";
-            var psi = new ProcessStartInfo
-            {
-                FileName = "powershell",
-                Arguments = $"-NoProfile -Command \"{script}\"",
-                CreateNoWindow = true,
-                UseShellExecute = false
-            };
-            using var process = Process.Start(psi);
-            process?.WaitForExit(4000);
             return process is { ExitCode: 0 };
         }
         catch
