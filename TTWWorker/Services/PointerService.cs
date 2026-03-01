@@ -69,7 +69,7 @@ public class PointerService
         }
     }
 
-    public bool LeftClick(int x, int y, int count)
+    public bool LeftClick(int x, int y, int count, int delayMilliseconds = 60)
     {
         if (!OperatingSystem.IsWindows())
         {
@@ -80,11 +80,12 @@ public class PointerService
         {
             if (!SetCursorPos(x, y)) return false;
 
+            var delay = Math.Max(1, delayMilliseconds);
             for (var i = 0; i < Math.Max(1, count); i++)
             {
                 mouse_event(LeftDown, 0, 0, 0, 0);
                 mouse_event(LeftUp, 0, 0, 0, 0);
-                Thread.Sleep(60);
+                Thread.Sleep(delay);
             }
 
             return true;

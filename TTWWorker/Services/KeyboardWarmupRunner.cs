@@ -15,12 +15,25 @@ public class KeyboardWarmupRunner
 
         OpenWindow();
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Профиль: {profile.Name}");
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {profile.AltTabIntervalSeconds} сек");
+
+        var altTabEnabled = profile.AltTabIntervalSeconds > 0;
+        var clickDelayMs = Math.Max(1, profile.ClickDelayMilliseconds);
+        var clickPeriodSec = Math.Max(1, profile.ClickPeriodSeconds);
+        var clicksPerPeriod = Math.Max(1, profile.ClicksPerPeriod);
+
+        var altTabMode = altTabEnabled
+            ? $"каждые {profile.AltTabIntervalSeconds} сек"
+            : "выключен";
+
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {altTabMode}");
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Клики: случайно в каждом периоде {clickPeriodSec} сек, {clicksPerPeriod} раз за период, задержка между кликами {clickDelayMs}мс");
+
+        var clickSchedule = BuildRandomClickSchedule(totalSeconds, clickPeriodSec, clicksPerPeriod);
 
         var nextDownAt = NextDownSecond(0, profile);
-        var nextAltTabAt = Math.Max(1, profile.AltTabIntervalSeconds);
+        var nextAltTabAt = altTabEnabled ? profile.AltTabIntervalSeconds : int.MaxValue;
         var downPressedAfterLastAltTab = false;
-        var altTabCounter = 0;
+        var clickCounter = 0;
 
         for (var sec = 1; sec <= totalSeconds; sec++)
         {
@@ -29,10 +42,8 @@ public class KeyboardWarmupRunner
             if (sec == nextAltTabAt)
             {
                 PressAltTab();
-                altTabCounter++;
-                ClickForAltTab(profile, altTabCounter);
                 downPressedAfterLastAltTab = false;
-                nextAltTabAt += Math.Max(1, profile.AltTabIntervalSeconds);
+                nextAltTabAt += profile.AltTabIntervalSeconds;
             }
 
             if (sec == nextDownAt)
@@ -42,11 +53,20 @@ public class KeyboardWarmupRunner
                 nextDownAt = NextDownSecond(sec, profile);
             }
 
-            if (!downPressedAfterLastAltTab && sec == nextAltTabAt - 1)
+            if (altTabEnabled && !downPressedAfterLastAltTab && sec == nextAltTabAt - 1)
             {
                 PressDown();
                 downPressedAfterLastAltTab = true;
                 nextDownAt = NextDownSecond(sec, profile);
+            }
+
+            if (clickSchedule.TryGetValue(sec, out var clickActionsAtSecond))
+            {
+                for (var i = 0; i < clickActionsAtSecond; i++)
+                {
+                    clickCounter++;
+                    ExecuteClick(profile, clickCounter, clickDelayMs);
+                }
             }
 
             if (sec % 30 == 0)
@@ -60,6 +80,25 @@ public class KeyboardWarmupRunner
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия завершена.");
     }
 
+    private Dictionary<int, int> BuildRandomClickSchedule(int totalSeconds, int clickPeriodSec, int clicksPerPeriod)
+    {
+        var schedule = new Dictionary<int, int>();
+
+        for (var periodStart = 1; periodStart <= totalSeconds; periodStart += clickPeriodSec)
+        {
+            var periodEnd = Math.Min(totalSeconds, periodStart + clickPeriodSec - 1);
+            var periodLength = periodEnd - periodStart + 1;
+
+            for (var i = 0; i < clicksPerPeriod; i++)
+            {
+                var second = periodStart + _random.Next(0, periodLength);
+                schedule[second] = schedule.GetValueOrDefault(second) + 1;
+            }
+        }
+
+        return schedule;
+    }
+
     private int NextDownSecond(int currentSecond, KeyboardProfile profile)
     {
         var min = Math.Max(1, profile.DownMinIntervalSeconds);
@@ -67,7 +106,7 @@ public class KeyboardWarmupRunner
         return currentSecond + _random.Next(min, max + 1);
     }
 
-    private void ClickForAltTab(KeyboardProfile profile, int altTabCounter)
+    private void ExecuteClick(KeyboardProfile profile, int clickCounter, int clickDelayMs)
     {
         if (profile.AltTabClickPoints.Count == 0)
         {
@@ -75,9 +114,9 @@ public class KeyboardWarmupRunner
             return;
         }
 
-        var point = profile.AltTabClickPoints[(altTabCounter - 1) % profile.AltTabClickPoints.Count];
-        var ok = _pointerService.LeftClick(point.X, point.Y, Math.Max(1, point.ClickCount));
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Mouse click x={point.X} y={point.Y} count={point.ClickCount} {(ok ? "sent" : "failed")}");
+        var point = profile.AltTabClickPoints[(clickCounter - 1) % profile.AltTabClickPoints.Count];
+        var ok = _pointerService.LeftClick(point.X, point.Y, Math.Max(1, point.ClickCount), clickDelayMs);
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Mouse click x={point.X} y={point.Y} count={point.ClickCount} delay={clickDelayMs}ms {(ok ? "sent" : "failed")}");
     }
 
     private void OpenWindow()
