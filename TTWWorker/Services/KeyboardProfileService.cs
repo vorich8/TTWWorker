@@ -43,7 +43,8 @@ public class KeyboardProfileService(JsonStorage storage)
             30,
             10,
             60,
-            ClickTimingMode.AfterDown,
+            30,
+            2,
             [new PixelClickPoint(960, 540, 4), new PixelClickPoint(960, 540, 4)]);
     }
 }

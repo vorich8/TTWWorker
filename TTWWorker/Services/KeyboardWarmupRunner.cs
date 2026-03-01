@@ -18,27 +18,22 @@ public class KeyboardWarmupRunner
 
         var altTabEnabled = profile.AltTabIntervalSeconds > 0;
         var clickDelayMs = Math.Max(1, profile.ClickDelayMilliseconds);
-        var configuredTiming = profile.ClickTiming;
-        var effectiveTiming = configuredTiming == ClickTimingMode.AfterAltTab && !altTabEnabled
-            ? ClickTimingMode.AfterDown
-            : configuredTiming;
+        var clickPeriodSec = Math.Max(1, profile.ClickPeriodSeconds);
+        var clicksPerPeriod = Math.Max(1, profile.ClicksPerPeriod);
 
         var altTabMode = altTabEnabled
             ? $"каждые {profile.AltTabIntervalSeconds} сек"
             : "выключен";
-        var timingLabel = effectiveTiming == ClickTimingMode.AfterAltTab ? "после Alt+Tab" : "после Down";
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {altTabMode}, клики: {timingLabel}, задержка {clickDelayMs}мс");
 
-        if (configuredTiming == ClickTimingMode.AfterAltTab && !altTabEnabled)
-        {
-            Console.WriteLine($"[{DateTime.Now:T}] [BOT] Click timing 'после Alt+Tab' невозможен при Alt+Tab=0, применяю 'после Down'.");
-        }
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {altTabMode}");
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Клики: случайно в каждом периоде {clickPeriodSec} сек, {clicksPerPeriod} раз за период, задержка между кликами {clickDelayMs}мс");
+
+        var clickSchedule = BuildRandomClickSchedule(totalSeconds, clickPeriodSec, clicksPerPeriod);
 
         var nextDownAt = NextDownSecond(0, profile);
         var nextAltTabAt = altTabEnabled ? profile.AltTabIntervalSeconds : int.MaxValue;
         var downPressedAfterLastAltTab = false;
-        var altTabCounter = 0;
-        var downCounter = 0;
+        var clickCounter = 0;
 
         for (var sec = 1; sec <= totalSeconds; sec++)
         {
@@ -47,11 +42,6 @@ public class KeyboardWarmupRunner
             if (sec == nextAltTabAt)
             {
                 PressAltTab();
-                altTabCounter++;
-                if (effectiveTiming == ClickTimingMode.AfterAltTab)
-                {
-                    ExecuteClick(profile, altTabCounter, clickDelayMs);
-                }
                 downPressedAfterLastAltTab = false;
                 nextAltTabAt += profile.AltTabIntervalSeconds;
             }
@@ -59,11 +49,6 @@ public class KeyboardWarmupRunner
             if (sec == nextDownAt)
             {
                 PressDown();
-                downCounter++;
-                if (effectiveTiming == ClickTimingMode.AfterDown)
-                {
-                    ExecuteClick(profile, downCounter, clickDelayMs);
-                }
                 downPressedAfterLastAltTab = true;
                 nextDownAt = NextDownSecond(sec, profile);
             }
@@ -75,6 +60,15 @@ public class KeyboardWarmupRunner
                 nextDownAt = NextDownSecond(sec, profile);
             }
 
+            if (clickSchedule.TryGetValue(sec, out var clickActionsAtSecond))
+            {
+                for (var i = 0; i < clickActionsAtSecond; i++)
+                {
+                    clickCounter++;
+                    ExecuteClick(profile, clickCounter, clickDelayMs);
+                }
+            }
+
             if (sec % 30 == 0)
             {
                 Console.WriteLine($"[{DateTime.Now:T}] [BOT] Прогресс: {sec}/{totalSeconds} сек");
@@ -84,6 +78,25 @@ public class KeyboardWarmupRunner
         }
 
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Сессия завершена.");
+    }
+
+    private Dictionary<int, int> BuildRandomClickSchedule(int totalSeconds, int clickPeriodSec, int clicksPerPeriod)
+    {
+        var schedule = new Dictionary<int, int>();
+
+        for (var periodStart = 1; periodStart <= totalSeconds; periodStart += clickPeriodSec)
+        {
+            var periodEnd = Math.Min(totalSeconds, periodStart + clickPeriodSec - 1);
+            var periodLength = periodEnd - periodStart + 1;
+
+            for (var i = 0; i < clicksPerPeriod; i++)
+            {
+                var second = periodStart + _random.Next(0, periodLength);
+                schedule[second] = schedule.GetValueOrDefault(second) + 1;
+            }
+        }
+
+        return schedule;
     }
 
     private int NextDownSecond(int currentSecond, KeyboardProfile profile)
