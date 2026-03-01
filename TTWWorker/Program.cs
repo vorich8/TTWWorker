@@ -106,6 +106,8 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source,
     var downMin = ReadIntWithDefault($"Down min сек (Enter={model.DownMinIntervalSeconds}): ", model.DownMinIntervalSeconds);
     var downMax = ReadIntWithDefault($"Down max сек (Enter={model.DownMaxIntervalSeconds}): ", model.DownMaxIntervalSeconds);
     var altTabSec = ReadIntWithDefault($"Alt+Tab интервал сек (0=выкл, Enter={model.AltTabIntervalSeconds}): ", model.AltTabIntervalSeconds);
+    var clickDelayMs = ReadIntWithDefault($"Задержка между кликами, мс (Enter={Math.Max(1, model.ClickDelayMilliseconds)}): ", Math.Max(1, model.ClickDelayMilliseconds));
+    var clickTiming = ReadClickTimingMode(model.ClickTiming);
     var defaultMinutes = ReadIntWithDefault($"Минуты по умолчанию (Enter={model.DefaultMinutes}): ", model.DefaultMinutes);
 
     var points = EditPoints(model.AltTabClickPoints, pointerService);
@@ -117,6 +119,8 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source,
         Math.Max(downMin, downMax),
         Math.Max(0, altTabSec),
         Math.Max(1, defaultMinutes),
+        Math.Max(1, clickDelayMs),
+        clickTiming,
         points);
 
     service.CreateOrUpdate(profile);
@@ -198,7 +202,8 @@ static void PrintProfiles(IReadOnlyList<KeyboardProfile> profiles)
     {
         var p = profiles[i];
         var altTabLabel = p.AltTabIntervalSeconds > 0 ? $"{p.AltTabIntervalSeconds}s" : "off";
-        Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {altTabLabel} | points={p.AltTabClickPoints.Count}");
+        var timingLabel = p.ClickTiming == ClickTimingMode.AfterDown ? "after-down" : "after-alt-tab";
+        Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {altTabLabel} | clickDelay={Math.Max(1, p.ClickDelayMilliseconds)}ms | timing={timingLabel} | points={p.AltTabClickPoints.Count}");
     }
 }
 
@@ -239,6 +244,25 @@ static (int X, int Y)? CapturePointWithLivePreview(PointerService pointerService
 
         Thread.Sleep(80);
     }
+}
+
+
+static ClickTimingMode ReadClickTimingMode(ClickTimingMode fallback)
+{
+    Console.WriteLine("Тайминг клика:");
+    Console.WriteLine("1) После Down");
+    Console.WriteLine("2) После Alt+Tab");
+
+    var fallbackOption = fallback == ClickTimingMode.AfterAltTab ? 2 : 1;
+    Console.Write($"Выберите вариант (Enter={fallbackOption}): ");
+    var raw = Console.ReadLine();
+
+    return raw?.Trim() switch
+    {
+        "2" => ClickTimingMode.AfterAltTab,
+        "1" => ClickTimingMode.AfterDown,
+        _ => fallback
+    };
 }
 
 static string ReadOrDefault(string fallback)

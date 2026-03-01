@@ -7,4 +7,6 @@ public record KeyboardProfile(
     int DownMaxIntervalSeconds,
     int AltTabIntervalSeconds,
     int DefaultMinutes,
+    int ClickDelayMilliseconds,
+    ClickTimingMode ClickTiming,
     IReadOnlyList<PixelClickPoint> AltTabClickPoints);
