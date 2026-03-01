@@ -105,7 +105,7 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source,
 
     var downMin = ReadIntWithDefault($"Down min сек (Enter={model.DownMinIntervalSeconds}): ", model.DownMinIntervalSeconds);
     var downMax = ReadIntWithDefault($"Down max сек (Enter={model.DownMaxIntervalSeconds}): ", model.DownMaxIntervalSeconds);
-    var altTabSec = ReadIntWithDefault($"Alt+Tab интервал сек (Enter={model.AltTabIntervalSeconds}): ", model.AltTabIntervalSeconds);
+    var altTabSec = ReadIntWithDefault($"Alt+Tab интервал сек (0=выкл, Enter={model.AltTabIntervalSeconds}): ", model.AltTabIntervalSeconds);
     var defaultMinutes = ReadIntWithDefault($"Минуты по умолчанию (Enter={model.DefaultMinutes}): ", model.DefaultMinutes);
 
     var points = EditPoints(model.AltTabClickPoints, pointerService);
@@ -115,7 +115,7 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source,
         name,
         Math.Max(1, downMin),
         Math.Max(downMin, downMax),
-        Math.Max(1, altTabSec),
+        Math.Max(0, altTabSec),
         Math.Max(1, defaultMinutes),
         points);
 
@@ -126,8 +126,8 @@ static void SaveProfile(KeyboardProfileService service, KeyboardProfile? source,
 static List<PixelClickPoint> EditPoints(IReadOnlyList<PixelClickPoint> source, PointerService pointerService)
 {
     var points = source.ToList();
-    Console.WriteLine("Настройка пикселей для клика ЛКМ после Alt+Tab.");
-    Console.WriteLine("Сколько точек хранить в профиле? (каждый Alt+Tab использует следующую точку по кругу)");
+    Console.WriteLine("Настройка пикселей для клика ЛКМ.");
+    Console.WriteLine("Сколько точек хранить в профиле? (каждый клик использует следующую точку по кругу)");
     Console.Write($"Enter={Math.Max(1, points.Count)}: ");
 
     var count = int.TryParse(Console.ReadLine(), out var c) && c > 0 ? c : Math.Max(1, points.Count);
@@ -197,7 +197,8 @@ static void PrintProfiles(IReadOnlyList<KeyboardProfile> profiles)
     for (var i = 0; i < profiles.Count; i++)
     {
         var p = profiles[i];
-        Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {p.AltTabIntervalSeconds}s | points={p.AltTabClickPoints.Count}");
+        var altTabLabel = p.AltTabIntervalSeconds > 0 ? $"{p.AltTabIntervalSeconds}s" : "off";
+        Console.WriteLine($"{i + 1}) {p.Name} | Down {p.DownMinIntervalSeconds}-{p.DownMaxIntervalSeconds}s | AltTab {altTabLabel} | points={p.AltTabClickPoints.Count}");
     }
 }
 

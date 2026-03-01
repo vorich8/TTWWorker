@@ -15,12 +15,17 @@ public class KeyboardWarmupRunner
 
         OpenWindow();
         Console.WriteLine($"[{DateTime.Now:T}] [BOT] Профиль: {profile.Name}");
-        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {profile.AltTabIntervalSeconds} сек");
+        var altTabMode = profile.AltTabIntervalSeconds > 0
+            ? $"каждые {profile.AltTabIntervalSeconds} сек"
+            : "выключен (клик после Down)";
+        Console.WriteLine($"[{DateTime.Now:T}] [BOT] Down: {profile.DownMinIntervalSeconds}-{profile.DownMaxIntervalSeconds} сек, Alt+Tab: {altTabMode}");
 
         var nextDownAt = NextDownSecond(0, profile);
-        var nextAltTabAt = Math.Max(1, profile.AltTabIntervalSeconds);
+        var altTabEnabled = profile.AltTabIntervalSeconds > 0;
+        var nextAltTabAt = altTabEnabled ? profile.AltTabIntervalSeconds : int.MaxValue;
         var downPressedAfterLastAltTab = false;
         var altTabCounter = 0;
+        var downCounter = 0;
 
         for (var sec = 1; sec <= totalSeconds; sec++)
         {
@@ -32,17 +37,22 @@ public class KeyboardWarmupRunner
                 altTabCounter++;
                 ClickForAltTab(profile, altTabCounter);
                 downPressedAfterLastAltTab = false;
-                nextAltTabAt += Math.Max(1, profile.AltTabIntervalSeconds);
+                nextAltTabAt += profile.AltTabIntervalSeconds;
             }
 
             if (sec == nextDownAt)
             {
                 PressDown();
+                downCounter++;
+                if (!altTabEnabled)
+                {
+                    ClickForAltTab(profile, downCounter);
+                }
                 downPressedAfterLastAltTab = true;
                 nextDownAt = NextDownSecond(sec, profile);
             }
 
-            if (!downPressedAfterLastAltTab && sec == nextAltTabAt - 1)
+            if (altTabEnabled && !downPressedAfterLastAltTab && sec == nextAltTabAt - 1)
             {
                 PressDown();
                 downPressedAfterLastAltTab = true;
