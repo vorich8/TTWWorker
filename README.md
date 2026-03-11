@@ -8,6 +8,9 @@
 - При запуске автоматизации открывает **новое окно браузера** с временным профилем.
 - В рабочем цикле делает **постоянный рескан JSON** перед каждым действием.
 - Нажимает действие из JSON в **рандомное время от 3 до 12 секунд** (или ваш диапазон).
+- При запущенной автоматизации принимает команды из консоли в любой момент:
+  - `like` — поставить лайк (нажимается клавиша из `automation.likeKey`, по умолчанию `KeyL`)
+  - `stop` — остановить автоматизацию
 
 ## Запуск
 
@@ -34,7 +37,8 @@ dotnet run --project TTWWorker -- scenario.json
     "maxDelaySeconds": 12,
     "actionType": "keyPress",
     "key": "ArrowDown",
-    "selector": ""
+    "selector": "",
+    "likeKey": "KeyL"
   }
 }
 ```
@@ -47,3 +51,4 @@ dotnet run --project TTWWorker -- scenario.json
 - `automation.actionType` — `keyPress` или `click`
 - `automation.key` — клавиша для `keyPress` (например `ArrowDown`)
 - `automation.selector` — CSS-селектор кнопки для `click` (если используете кнопку справа ниже центра)
+- `automation.likeKey` — клавиша для команды `like` (по умолчанию `KeyL`)

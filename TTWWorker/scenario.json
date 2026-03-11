@@ -6,6 +6,7 @@
     "maxDelaySeconds": 12,
     "actionType": "keyPress",
     "key": "ArrowDown",
-    "selector": ""
+    "selector": "",
+    "likeKey": "KeyL"
   }
 }

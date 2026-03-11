@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Playwright;
 
@@ -104,6 +105,13 @@ internal sealed class ControlPanel(string configPath)
             }
         }
 
+        Console.Write("Клавиша лайка (пусто = KeyL): ");
+        var likeKey = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(likeKey))
+        {
+            config.Automation.LikeKey = likeKey;
+        }
+
         await SaveConfigAsync(config);
         Console.WriteLine("Настройки сохранены.");
     }
@@ -140,14 +148,27 @@ internal sealed class ControlPanel(string configPath)
             var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
             await page.GotoAsync(initialConfig.StartUrl);
 
-            Console.WriteLine("Автоматизация запущена. Остановить: Ctrl+C");
+            Console.WriteLine("Автоматизация запущена.");
+            Console.WriteLine("Команды в любой момент: like | stop");
 
-            while (true)
+            var commandQueue = new ConcurrentQueue<string>();
+            using var cts = new CancellationTokenSource();
+            var inputTask = Task.Run(() => ReadCommands(commandQueue, cts.Token), cts.Token);
+
+            while (!cts.Token.IsCancellationRequested)
             {
                 var cfg = LoadConfig(); // ПОСТОЯННЫЙ РЕСКАН JSON
+                await ExecuteCommandsAsync(page, cfg, commandQueue, cts);
+
                 var delaySec = Random.Shared.Next(cfg.Automation.MinDelaySeconds, cfg.Automation.MaxDelaySeconds + 1);
                 Console.WriteLine($"Ожидание {delaySec} сек... (рескан JSON выполнен)");
                 await page.WaitForTimeoutAsync(delaySec * 1000);
+
+                await ExecuteCommandsAsync(page, cfg, commandQueue, cts);
+                if (cts.Token.IsCancellationRequested)
+                {
+                    break;
+                }
 
                 if (cfg.Automation.ActionType == "click" && !string.IsNullOrWhiteSpace(cfg.Automation.Selector))
                 {
@@ -161,10 +182,49 @@ internal sealed class ControlPanel(string configPath)
                     Console.WriteLine($"Нажата клавиша из JSON: {key}");
                 }
             }
+
+            cts.Cancel();
+            try { await inputTask; } catch { }
+            Console.WriteLine("Автоматизация остановлена командой stop.");
         }
         finally
         {
             RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
+        }
+    }
+
+    private static void ReadCommands(ConcurrentQueue<string> queue, CancellationToken token)
+    {
+        while (!token.IsCancellationRequested)
+        {
+            var command = Console.ReadLine();
+            if (!string.IsNullOrWhiteSpace(command))
+            {
+                queue.Enqueue(command.Trim().ToLowerInvariant());
+            }
+        }
+    }
+
+    private static async Task ExecuteCommandsAsync(IPage page, AppConfig cfg, ConcurrentQueue<string> queue, CancellationTokenSource cts)
+    {
+        while (queue.TryDequeue(out var cmd))
+        {
+            switch (cmd)
+            {
+                case "like":
+                    var likeKey = string.IsNullOrWhiteSpace(cfg.Automation.LikeKey) ? "KeyL" : cfg.Automation.LikeKey;
+                    await page.Keyboard.PressAsync(likeKey);
+                    Console.WriteLine($"Команда like выполнена: нажата клавиша {likeKey}");
+                    break;
+
+                case "stop":
+                    cts.Cancel();
+                    break;
+
+                default:
+                    Console.WriteLine($"Неизвестная команда: {cmd}. Доступно: like | stop");
+                    break;
+            }
         }
     }
 
@@ -222,4 +282,5 @@ internal sealed class SimpleAutomation
     public string ActionType { get; set; } = "keyPress";
     public string Key { get; set; } = "ArrowDown";
     public string Selector { get; set; } = "";
+    public string LikeKey { get; set; } = "KeyL";
 }
