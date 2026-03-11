@@ -4,9 +4,9 @@ JSON-раннер автоматизации TikTok с запуском чере
 
 ## Что изменено
 
-Проект больше не зависит от скачанного Playwright Chromium для запуска сценария: теперь используется установленный в системе `browser.exe` Яндекс.Браузера, `userDataDir` и имя профиля (`Default`, `Profile 1` и т.д.) из `scenario.json`.
+Проект запускает установленный в системе Яндекс.Браузер в persistent-режиме Playwright и использует папку профилей (`User Data`) + имя профиля (`Default`, `Profile 1` и т.д.) из `scenario.json`.
 
-Это позволяет использовать уже сохранённую сессию (авторизацию) профиля.
+Если путь в `browser.executablePath` не найден, раннер пробует типовые пути установки автоматически и выводит список проверенных путей в лог.
 
 ## Запуск
 
@@ -24,8 +24,8 @@ dotnet run --project TTWWorker -- scenario.json
   "loginWaitSeconds": 5,
   "slowMoMs": 60,
   "browser": {
-    "executablePath": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/Application/browser.exe",
-    "userDataDir": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/User Data",
+    "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
+    "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default"
   },
   "steps": [
@@ -48,4 +48,4 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Логи
 
-Все основные сообщения раннера выводятся на русском языке (загрузка сценария, запуск браузера, выполнение шагов, ошибки валидации).
+Все основные сообщения раннера выводятся на русском языке (загрузка сценария, найденные пути браузера, выполнение шагов, ошибки валидации).

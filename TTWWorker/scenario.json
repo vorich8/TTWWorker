@@ -4,8 +4,8 @@
   "loginWaitSeconds": 5,
   "slowMoMs": 60,
   "browser": {
-    "executablePath": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/Application/browser.exe",
-    "userDataDir": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/User Data",
+    "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
+    "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default"
   },
   "steps": [

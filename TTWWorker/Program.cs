@@ -30,37 +30,40 @@ if (scenario is null)
 
 if (string.IsNullOrWhiteSpace(scenario.StartUrl))
 {
-    Console.WriteLine("В сценарии обязательно поле StartUrl.");
+    Console.WriteLine("В сценарии обязательно поле startUrl.");
     return;
 }
 
-if (string.IsNullOrWhiteSpace(scenario.Browser.ExecutablePath))
+if (!BrowserPathResolver.TryResolveExecutablePath(scenario.Browser.ExecutablePath, out var executablePath, out var checkedExecutablePaths))
 {
-    Console.WriteLine("В сценарии обязательно поле browser.executablePath (путь к yandex.exe). ");
+    Console.WriteLine("Не удалось найти исполняемый файл браузера.");
+    Console.WriteLine("Проверенные пути:");
+    foreach (var path in checkedExecutablePaths)
+    {
+        Console.WriteLine($" - {path}");
+    }
+
+    Console.WriteLine("Укажи рабочий путь в browser.executablePath или установи Яндекс.Браузер.");
     return;
 }
 
-if (!File.Exists(scenario.Browser.ExecutablePath))
+if (!BrowserPathResolver.TryResolveUserDataDir(scenario.Browser.UserDataDir, out var userDataDir, out var checkedUserDataDirs))
 {
-    Console.WriteLine($"Исполняемый файл браузера не найден: {scenario.Browser.ExecutablePath}");
-    return;
-}
+    Console.WriteLine("Не удалось найти папку данных профиля браузера (userDataDir).");
+    Console.WriteLine("Проверенные пути:");
+    foreach (var path in checkedUserDataDirs)
+    {
+        Console.WriteLine($" - {path}");
+    }
 
-if (string.IsNullOrWhiteSpace(scenario.Browser.UserDataDir))
-{
-    Console.WriteLine("В сценарии обязательно поле browser.userDataDir (путь к данным профиля браузера).");
-    return;
-}
-
-if (!Directory.Exists(scenario.Browser.UserDataDir))
-{
-    Console.WriteLine($"Папка userDataDir не найдена: {scenario.Browser.UserDataDir}");
+    Console.WriteLine("Укажи рабочий путь в browser.userDataDir.");
     return;
 }
 
 Console.WriteLine($"Сценарий загружен: {scenario.Name}");
 Console.WriteLine($"Шагов в сценарии: {scenario.Steps.Count}");
-Console.WriteLine($"Браузер: {scenario.Browser.ExecutablePath}");
+Console.WriteLine($"Браузер: {executablePath}");
+Console.WriteLine($"Папка профилей: {userDataDir}");
 Console.WriteLine($"Профиль: {scenario.Browser.ProfileDirectoryName}");
 
 using var playwright = await Playwright.CreateAsync();
@@ -72,12 +75,12 @@ if (!string.IsNullOrWhiteSpace(scenario.Browser.ProfileDirectoryName))
 }
 
 await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
-    userDataDir: scenario.Browser.UserDataDir,
+    userDataDir: userDataDir,
     new BrowserTypeLaunchPersistentContextOptions
     {
         Headless = false,
         SlowMo = scenario.SlowMoMs,
-        ExecutablePath = scenario.Browser.ExecutablePath,
+        ExecutablePath = executablePath,
         Args = launchArgs,
         ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
     });
@@ -97,6 +100,82 @@ var runner = new ScenarioRunner(page);
 await runner.RunAsync(scenario);
 
 Console.WriteLine("Сценарий выполнен.");
+
+internal static class BrowserPathResolver
+{
+    public static bool TryResolveExecutablePath(string? configuredPath, out string executablePath, out List<string> checkedPaths)
+    {
+        checkedPaths = [];
+
+        var candidates = new List<string>();
+        AddIfNotEmpty(candidates, configuredPath);
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "Application", "browser.exe"));
+        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
+
+        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+        AddIfNotEmpty(candidates, Path.Combine(programFiles, "Yandex", "YandexBrowser", "Application", "browser.exe"));
+        AddIfNotEmpty(candidates, Path.Combine(programFiles, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
+
+        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
+        AddIfNotEmpty(candidates, Path.Combine(programFilesX86, "Yandex", "YandexBrowser", "Application", "browser.exe"));
+        AddIfNotEmpty(candidates, Path.Combine(programFilesX86, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
+
+        foreach (var rawCandidate in candidates)
+        {
+            var candidate = ExpandPath(rawCandidate);
+            checkedPaths.Add(candidate);
+            if (File.Exists(candidate))
+            {
+                executablePath = candidate;
+                return true;
+            }
+        }
+
+        executablePath = string.Empty;
+        return false;
+    }
+
+    public static bool TryResolveUserDataDir(string? configuredPath, out string userDataDir, out List<string> checkedPaths)
+    {
+        checkedPaths = [];
+
+        var candidates = new List<string>();
+        AddIfNotEmpty(candidates, configuredPath);
+
+        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "User Data"));
+
+        foreach (var rawCandidate in candidates)
+        {
+            var candidate = ExpandPath(rawCandidate);
+            checkedPaths.Add(candidate);
+            if (Directory.Exists(candidate))
+            {
+                userDataDir = candidate;
+                return true;
+            }
+        }
+
+        userDataDir = string.Empty;
+        return false;
+    }
+
+    private static string ExpandPath(string value)
+    {
+        var expanded = Environment.ExpandEnvironmentVariables(value);
+        return Path.GetFullPath(expanded);
+    }
+
+    private static void AddIfNotEmpty(List<string> list, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            list.Add(value.Trim());
+        }
+    }
+}
 
 internal sealed class ScenarioRunner(IPage page)
 {
@@ -175,8 +254,8 @@ internal sealed class ScenarioDefinition
 
 internal sealed class BrowserDefinition
 {
-    public string ExecutablePath { get; init; } = @"C:\\Users\\%USERNAME%\\AppData\\Local\\Yandex\\YandexBrowser\\Application\\browser.exe";
-    public string UserDataDir { get; init; } = @"C:\\Users\\%USERNAME%\\AppData\\Local\\Yandex\\YandexBrowser\\User Data";
+    public string ExecutablePath { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe";
+    public string UserDataDir { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data";
     public string ProfileDirectoryName { get; init; } = "Default";
 }
 
