@@ -1,333 +1,193 @@
-using System.Diagnostics;
 using System.Text.Json;
-using System.Text.Json.Serialization;
 using Microsoft.Playwright;
 
-const string defaultScenarioPath = "scenario.json";
-var scenarioPath = args.FirstOrDefault() ?? defaultScenarioPath;
+const string defaultConfigPath = "scenario.json";
+var configPath = args.FirstOrDefault() ?? defaultConfigPath;
 
-if (!File.Exists(scenarioPath))
+var app = new ControlPanel(configPath);
+await app.RunAsync();
+
+internal sealed class ControlPanel(string configPath)
 {
-    Console.WriteLine($"Файл сценария не найден: {scenarioPath}");
-    Console.WriteLine("Пример запуска: dotnet run -- <путь-к-scenario.json>");
-    return;
-}
+    private readonly string _configPath = configPath;
+    private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
 
-var options = new JsonSerializerOptions
-{
-    PropertyNameCaseInsensitive = true,
-    ReadCommentHandling = JsonCommentHandling.Skip,
-};
-options.Converters.Add(new JsonStringEnumConverter(JsonNamingPolicy.CamelCase));
-
-var json = await File.ReadAllTextAsync(scenarioPath);
-var scenario = JsonSerializer.Deserialize<ScenarioDefinition>(json, options);
-
-if (scenario is null)
-{
-    Console.WriteLine("Не удалось разобрать JSON сценария.");
-    return;
-}
-
-if (string.IsNullOrWhiteSpace(scenario.StartUrl))
-{
-    Console.WriteLine("В сценарии обязательно поле startUrl.");
-    return;
-}
-
-if (!BrowserPathResolver.TryResolveExecutablePath(scenario.Browser.ExecutablePath, out var executablePath, out var checkedExecutablePaths))
-{
-    Console.WriteLine("Не удалось найти исполняемый файл браузера.");
-    Console.WriteLine("Проверенные пути:");
-    foreach (var path in checkedExecutablePaths)
+    public async Task RunAsync()
     {
-        Console.WriteLine($" - {path}");
-    }
+        EnsureConfigExists();
 
-    return;
-}
-
-Console.WriteLine($"Сценарий загружен: {scenario.Name}");
-Console.WriteLine($"Шагов в сценарии: {scenario.Steps.Count}");
-Console.WriteLine($"Браузер: {executablePath}");
-Console.WriteLine("Профиль: новый временный (без использования профиля Яндекса)");
-Console.WriteLine($"Режим запуска: {scenario.Browser.LaunchMode}");
-
-using var playwright = await Playwright.CreateAsync();
-BrowserSession? session = null;
-
-try
-{
-    session = await BrowserLauncher.LaunchAsync(playwright, scenario, executablePath);
-
-    Console.WriteLine($"Переход на: {scenario.StartUrl}");
-    await session.Page.GotoAsync(scenario.StartUrl);
-
-    if (scenario.LoginWaitSeconds > 0)
-    {
-        Console.WriteLine($"Ожидание перед стартом: {scenario.LoginWaitSeconds} сек.");
-        await session.Page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
-    }
-
-    var runner = new ScenarioRunner(session.Page);
-    await runner.RunAsync(scenario);
-
-    Console.WriteLine("Сценарий выполнен.");
-}
-catch (Exception ex) when (ex is PlaywrightException or InvalidOperationException)
-{
-    Console.WriteLine("Ошибка запуска/выполнения сценария.");
-    Console.WriteLine(ex.Message);
-    Console.WriteLine("Подсказка: в режиме cdp закрой старые браузеры или смени cdpPort.");
-    return;
-}
-finally
-{
-    if (session is not null)
-    {
-        await session.DisposeAsync();
-    }
-}
-
-internal static class BrowserLauncher
-{
-    public static async Task<BrowserSession> LaunchAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
-    {
-        return scenario.Browser.LaunchMode switch
+        while (true)
         {
-            BrowserLaunchMode.Cdp => await LaunchCdpAsync(playwright, scenario, executablePath),
-            BrowserLaunchMode.Persistent => await LaunchPersistentWithFallbackAsync(playwright, scenario, executablePath),
-            _ => throw new InvalidOperationException($"Неизвестный launchMode: {scenario.Browser.LaunchMode}"),
-        };
-    }
+            Console.WriteLine();
+            Console.WriteLine("=== ПУНКТ УПРАВЛЕНИЯ TTWWorker ===");
+            Console.WriteLine("1) Запустить автоматизацию");
+            Console.WriteLine("2) Настроить простую автоматизацию");
+            Console.WriteLine("3) Показать текущий JSON");
+            Console.WriteLine("0) Выход");
+            Console.Write("Выбор: ");
 
-    private static async Task<BrowserSession> LaunchPersistentWithFallbackAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
-    {
-        var runtimeUserDataDir = RuntimeProfileStore.CreateEmptyUserDataDir();
-        Console.WriteLine($"Создан новый временный профиль: {runtimeUserDataDir}");
-
-        var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, runtimeUserDataDir);
-        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-
-        return new BrowserSession(page, async () =>
-        {
-            await context.CloseAsync();
-            RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
-        });
-    }
-
-    private static async Task<IBrowserContext> LaunchPersistentContextAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
-    {
-        var args = BuildCommonArgs(scenario.Browser.AdditionalArgs);
-
-        return await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
-        {
-            Headless = false,
-            SlowMo = scenario.SlowMoMs,
-            ExecutablePath = executablePath,
-            Args = args,
-            ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
-        });
-    }
-
-    private static async Task<BrowserSession> LaunchCdpAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
-    {
-        var mustStartDedicatedBrowser = scenario.Browser.ForceNewWindow;
-        var runtimeUserDataDir = RuntimeProfileStore.CreateEmptyUserDataDir();
-        Console.WriteLine($"Для CDP создан новый временный профиль: {runtimeUserDataDir}");
-
-        var selectedPort = await PickPortAsync(scenario.Browser.CdpPort, mustStartDedicatedBrowser);
-        var endpoint = $"http://127.0.0.1:{selectedPort}";
-
-        Process? process = null;
-        if (mustStartDedicatedBrowser)
-        {
-            Console.WriteLine($"Запускаю отдельное окно браузера (CDP): {endpoint}");
-            process = StartBrowserProcess(executablePath, runtimeUserDataDir, scenario, selectedPort, openNewWindow: true);
-            await CdpProbe.WaitUntilReadyAsync(selectedPort, 15000);
+            var input = Console.ReadLine()?.Trim();
+            switch (input)
+            {
+                case "1":
+                    await RunAutomationAsync();
+                    break;
+                case "2":
+                    await ConfigureSimpleAutomationAsync();
+                    break;
+                case "3":
+                    ShowCurrentJson();
+                    break;
+                case "0":
+                    return;
+                default:
+                    Console.WriteLine("Неизвестная команда.");
+                    break;
+            }
         }
-        else if (!await CdpProbe.IsEndpointReadyAsync(selectedPort))
+    }
+
+    private void EnsureConfigExists()
+    {
+        if (File.Exists(_configPath))
         {
-            Console.WriteLine($"CDP endpoint {endpoint} не найден. Запускаю Яндекс.Браузер вручную...");
-            process = StartBrowserProcess(executablePath, runtimeUserDataDir, scenario, selectedPort, openNewWindow: false);
-            await CdpProbe.WaitUntilReadyAsync(selectedPort, 15000);
+            return;
+        }
+
+        var defaultConfig = AppConfig.CreateDefault();
+        File.WriteAllText(_configPath, JsonSerializer.Serialize(defaultConfig, _jsonOptions));
+    }
+
+    private async Task ConfigureSimpleAutomationAsync()
+    {
+        var config = LoadConfig();
+
+        Console.Write("URL (пусто = оставить текущий): ");
+        var url = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(url))
+        {
+            config.StartUrl = url;
+        }
+
+        Console.Write("Минимальная задержка (сек): ");
+        if (int.TryParse(Console.ReadLine(), out var minSeconds) && minSeconds > 0)
+        {
+            config.Automation.MinDelaySeconds = minSeconds;
+        }
+
+        Console.Write("Максимальная задержка (сек): ");
+        if (int.TryParse(Console.ReadLine(), out var maxSeconds) && maxSeconds >= config.Automation.MinDelaySeconds)
+        {
+            config.Automation.MaxDelaySeconds = maxSeconds;
+        }
+
+        Console.Write("JSON-кнопка (keyPress/click): ");
+        var actionType = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (actionType is "keypress" or "click")
+        {
+            config.Automation.ActionType = actionType;
+        }
+
+        if (config.Automation.ActionType == "keypress")
+        {
+            Console.Write("Клавиша (пусто = ArrowDown): ");
+            var key = Console.ReadLine()?.Trim();
+            config.Automation.Key = string.IsNullOrWhiteSpace(key) ? "ArrowDown" : key;
         }
         else
         {
-            Console.WriteLine($"Использую уже доступный CDP endpoint: {endpoint}");
+            Console.Write("CSS-селектор кнопки справа ниже центра: ");
+            var selector = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(selector))
+            {
+                config.Automation.Selector = selector;
+            }
         }
 
-        try
+        await SaveConfigAsync(config);
+        Console.WriteLine("Настройки сохранены.");
+    }
+
+    private void ShowCurrentJson()
+    {
+        Console.WriteLine();
+        Console.WriteLine(File.ReadAllText(_configPath));
+    }
+
+    private async Task RunAutomationAsync()
+    {
+        var initialConfig = LoadConfig();
+        if (!File.Exists(initialConfig.BrowserExecutablePath))
         {
-            var browser = await playwright.Chromium.ConnectOverCDPAsync(endpoint);
-            var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
-            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+            Console.WriteLine($"Браузер не найден: {initialConfig.BrowserExecutablePath}");
+            return;
+        }
 
-            return new BrowserSession(page, async () =>
+        using var playwright = await Playwright.CreateAsync();
+        var runtimeUserDataDir = RuntimeProfileStore.CreateTempProfileDir();
+
+        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
+            runtimeUserDataDir,
+            new BrowserTypeLaunchPersistentContextOptions
             {
-                await browser.CloseAsync();
-
-                if (process is not null && !scenario.Browser.KeepBrowserOpen)
-                {
-                    TryKill(process);
-                }
-
-                RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
+                ExecutablePath = initialConfig.BrowserExecutablePath,
+                Headless = false,
+                Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
             });
-        }
-        catch
-        {
-            if (process is not null && !scenario.Browser.KeepBrowserOpen)
-            {
-                TryKill(process);
-            }
 
+        try
+        {
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+            await page.GotoAsync(initialConfig.StartUrl);
+
+            Console.WriteLine("Автоматизация запущена. Остановить: Ctrl+C");
+
+            while (true)
+            {
+                var cfg = LoadConfig(); // ПОСТОЯННЫЙ РЕСКАН JSON
+                var delaySec = Random.Shared.Next(cfg.Automation.MinDelaySeconds, cfg.Automation.MaxDelaySeconds + 1);
+                Console.WriteLine($"Ожидание {delaySec} сек... (рескан JSON выполнен)");
+                await page.WaitForTimeoutAsync(delaySec * 1000);
+
+                if (cfg.Automation.ActionType == "click" && !string.IsNullOrWhiteSpace(cfg.Automation.Selector))
+                {
+                    await page.ClickAsync(cfg.Automation.Selector);
+                    Console.WriteLine($"Нажата JSON-кнопка по селектору: {cfg.Automation.Selector}");
+                }
+                else
+                {
+                    var key = string.IsNullOrWhiteSpace(cfg.Automation.Key) ? "ArrowDown" : cfg.Automation.Key;
+                    await page.Keyboard.PressAsync(key);
+                    Console.WriteLine($"Нажата клавиша из JSON: {key}");
+                }
+            }
+        }
+        finally
+        {
             RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
-
-            throw;
         }
     }
 
-    private static Process StartBrowserProcess(string executablePath, string userDataDir, ScenarioDefinition scenario, int cdpPort, bool openNewWindow)
+    private AppConfig LoadConfig()
     {
-        var startInfo = new ProcessStartInfo(executablePath)
-        {
-            UseShellExecute = false,
-        };
-
-        startInfo.ArgumentList.Add($"--remote-debugging-port={cdpPort}");
-        startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
-        startInfo.ArgumentList.Add("--no-first-run");
-        startInfo.ArgumentList.Add("--no-default-browser-check");
-
-        if (openNewWindow)
-        {
-            startInfo.ArgumentList.Add("--new-window");
-        }
-
-        foreach (var arg in scenario.Browser.AdditionalArgs)
-        {
-            if (!string.IsNullOrWhiteSpace(arg))
-            {
-                startInfo.ArgumentList.Add(arg);
-            }
-        }
-
-        startInfo.ArgumentList.Add("about:blank");
-
-        var process = Process.Start(startInfo);
-        if (process is null)
-        {
-            throw new InvalidOperationException("Не удалось запустить процесс браузера.");
-        }
-
-        Console.WriteLine($"Браузер запущен вручную. PID: {process.Id}");
-        return process;
+        var json = File.ReadAllText(_configPath);
+        return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? AppConfig.CreateDefault();
     }
 
-    private static async Task<int> PickPortAsync(int preferredPort, bool dedicatedWindow)
+    private Task SaveConfigAsync(AppConfig config)
     {
-        if (!dedicatedWindow)
-        {
-            return preferredPort;
-        }
-
-        if (!await CdpProbe.IsEndpointReadyAsync(preferredPort))
-        {
-            return preferredPort;
-        }
-
-        for (var offset = 1; offset <= 20; offset++)
-        {
-            var candidatePort = preferredPort + offset;
-            if (!await CdpProbe.IsEndpointReadyAsync(candidatePort))
-            {
-                Console.WriteLine($"Порт {preferredPort} уже занят. Выбран свободный порт: {candidatePort}");
-                return candidatePort;
-            }
-        }
-
-        throw new InvalidOperationException("Не удалось подобрать свободный CDP порт для отдельного окна браузера.");
+        var json = JsonSerializer.Serialize(config, _jsonOptions);
+        return File.WriteAllTextAsync(_configPath, json);
     }
-
-    private static List<string> BuildCommonArgs(List<string> additionalArgs)
-    {
-        var args = new List<string>
-        {
-            "--no-first-run",
-            "--no-default-browser-check",
-        };
-
-        args.AddRange(additionalArgs.Where(x => !string.IsNullOrWhiteSpace(x)));
-        return args;
-    }
-
-    private static void TryKill(Process process)
-    {
-        try
-        {
-            if (!process.HasExited)
-            {
-                process.Kill(entireProcessTree: true);
-            }
-        }
-        catch
-        {
-            // ignore
-        }
-    }
-}
-
-internal static class CdpProbe
-{
-    public static async Task<bool> IsEndpointReadyAsync(int port)
-    {
-        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
-
-        try
-        {
-            using var response = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
-            return response.IsSuccessStatusCode;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    public static async Task WaitUntilReadyAsync(int port, int timeoutMs)
-    {
-        var started = DateTime.UtcNow;
-
-        while ((DateTime.UtcNow - started).TotalMilliseconds < timeoutMs)
-        {
-            if (await IsEndpointReadyAsync(port))
-            {
-                return;
-            }
-
-            await Task.Delay(300);
-        }
-
-        throw new InvalidOperationException($"CDP endpoint не поднялся за {timeoutMs} мс на порту {port}.");
-    }
-}
-
-internal sealed class BrowserSession(IPage page, Func<Task> dispose)
-{
-    private readonly Func<Task> _dispose = dispose;
-    public IPage Page { get; } = page;
-
-    public Task DisposeAsync() => _dispose();
 }
 
 internal static class RuntimeProfileStore
 {
-    public static string CreateEmptyUserDataDir()
+    public static string CreateTempProfileDir()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), "TTWWorker", $"runtime-profile-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
-        Directory.CreateDirectory(tempRoot);
-        return tempRoot;
+        var dir = Path.Combine(Path.GetTempPath(), "TTWWorker", $"runtime-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
+        Directory.CreateDirectory(dir);
+        return dir;
     }
 
     public static void TryDeleteDirectory(string path)
@@ -336,173 +196,30 @@ internal static class RuntimeProfileStore
         {
             if (Directory.Exists(path))
             {
-                Directory.Delete(path, recursive: true);
+                Directory.Delete(path, true);
             }
         }
         catch
         {
-            Console.WriteLine($"Не удалось удалить временную папку профиля: {path}");
+            Console.WriteLine($"Не удалось удалить временный профиль: {path}");
         }
     }
 }
 
-internal static class BrowserPathResolver
+internal sealed class AppConfig
 {
-    public static bool TryResolveExecutablePath(string? configuredPath, out string executablePath, out List<string> checkedPaths)
-    {
-        checkedPaths = [];
+    public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
+    public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
+    public SimpleAutomation Automation { get; set; } = new();
 
-        var candidates = new List<string>();
-        AddIfNotEmpty(candidates, configuredPath);
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "Application", "browser.exe"));
-        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
-
-        var programFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
-        AddIfNotEmpty(candidates, Path.Combine(programFiles, "Yandex", "YandexBrowser", "Application", "browser.exe"));
-        AddIfNotEmpty(candidates, Path.Combine(programFiles, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
-
-        var programFilesX86 = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86);
-        AddIfNotEmpty(candidates, Path.Combine(programFilesX86, "Yandex", "YandexBrowser", "Application", "browser.exe"));
-        AddIfNotEmpty(candidates, Path.Combine(programFilesX86, "Yandex", "YandexBrowser", "Application", "yandex.exe"));
-
-        foreach (var rawCandidate in candidates)
-        {
-            var candidate = ExpandPath(rawCandidate);
-            checkedPaths.Add(candidate);
-            if (File.Exists(candidate))
-            {
-                executablePath = candidate;
-                return true;
-            }
-        }
-
-        executablePath = string.Empty;
-        return false;
-    }
-
-    private static string ExpandPath(string value)
-    {
-        var expanded = Environment.ExpandEnvironmentVariables(value);
-        return Path.GetFullPath(expanded);
-    }
-
-    private static void AddIfNotEmpty(List<string> list, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            list.Add(value.Trim());
-        }
-    }
+    public static AppConfig CreateDefault() => new();
 }
 
-internal sealed class ScenarioRunner(IPage page)
+internal sealed class SimpleAutomation
 {
-    private readonly IPage _page = page;
-
-    public async Task RunAsync(ScenarioDefinition scenario)
-    {
-        for (var index = 0; index < scenario.Steps.Count; index++)
-        {
-            var step = scenario.Steps[index];
-            Console.WriteLine($"Шаг {index + 1}/{scenario.Steps.Count}: {step.Action}");
-            await RunStepAsync(step);
-        }
-    }
-
-    private async Task RunStepAsync(StepDefinition step)
-    {
-        for (var i = 0; i < Math.Max(1, step.Repeat); i++)
-        {
-            switch (step.Action)
-            {
-                case StepAction.Wait:
-                    await _page.WaitForTimeoutAsync(step.DurationMs ?? 500);
-                    break;
-
-                case StepAction.KeyPress:
-                    EnsureNotNull(step.Key, step.Action, nameof(step.Key));
-                    await _page.Keyboard.PressAsync(step.Key!);
-                    await DelayAfterStep(step);
-                    break;
-
-                case StepAction.Click:
-                    EnsureNotNull(step.Selector, step.Action, nameof(step.Selector));
-                    await _page.ClickAsync(step.Selector!);
-                    await DelayAfterStep(step);
-                    break;
-
-                case StepAction.Navigate:
-                    EnsureNotNull(step.Url, step.Action, nameof(step.Url));
-                    await _page.GotoAsync(step.Url!);
-                    await DelayAfterStep(step);
-                    break;
-
-                default:
-                    throw new InvalidOperationException($"Неизвестное действие: {step.Action}");
-            }
-        }
-    }
-
-    private static void EnsureNotNull(string? value, StepAction action, string field)
-    {
-        if (string.IsNullOrWhiteSpace(value))
-        {
-            throw new InvalidOperationException($"Поле {field} обязательно для действия '{action}'.");
-        }
-    }
-
-    private async Task DelayAfterStep(StepDefinition step)
-    {
-        if (step.AfterDelayMs is > 0)
-        {
-            await _page.WaitForTimeoutAsync(step.AfterDelayMs.Value);
-        }
-    }
-}
-
-internal sealed class ScenarioDefinition
-{
-    public string Name { get; init; } = "Автоматизация TikTok";
-    public string StartUrl { get; init; } = "https://www.tiktok.com/foryou";
-    public int LoginWaitSeconds { get; init; } = 10;
-    public float? SlowMoMs { get; init; }
-    public BrowserDefinition Browser { get; init; } = new();
-    public List<StepDefinition> Steps { get; init; } = [];
-}
-
-internal sealed class BrowserDefinition
-{
-    public string ExecutablePath { get; init; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
-    public BrowserLaunchMode LaunchMode { get; init; } = BrowserLaunchMode.Cdp;
-    public int CdpPort { get; init; } = 9222;
-    public bool KeepBrowserOpen { get; init; }
-    public bool ForceNewWindow { get; init; } = true;
-    public List<string> AdditionalArgs { get; init; } = [];
-}
-
-internal enum BrowserLaunchMode
-{
-    Cdp,
-    Persistent,
-}
-
-internal sealed class StepDefinition
-{
-    public StepAction Action { get; init; }
-    public string? Key { get; init; }
-    public string? Selector { get; init; }
-    public string? Url { get; init; }
-    public int? DurationMs { get; init; }
-    public int? AfterDelayMs { get; init; }
-    public int Repeat { get; init; } = 1;
-}
-
-internal enum StepAction
-{
-    Wait,
-    KeyPress,
-    Click,
-    Navigate,
+    public int MinDelaySeconds { get; set; } = 3;
+    public int MaxDelaySeconds { get; set; } = 12;
+    public string ActionType { get; set; } = "keyPress";
+    public string Key { get; set; } = "ArrowDown";
+    public string Selector { get; set; } = "";
 }

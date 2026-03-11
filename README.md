@@ -1,12 +1,13 @@
 # TTWWorker
 
-JSON-раннер автоматизации TikTok через Яндекс.Браузер.
+Упрощённая автоматизация TikTok через **пункт управления в консоли** с постоянным ресканом `scenario.json`.
 
-## Важное изменение
+## Что теперь делает программа
 
-По вашему требованию **профили Яндекса больше не используются**.
-
-Теперь при каждом запуске создаётся **новый временный профиль** (чистая сессия), браузер открывается в новом окне и после завершения временная папка удаляется.
+- Запускается как консольный пульт (`1/2/3/0`).
+- При запуске автоматизации открывает **новое окно браузера** с временным профилем.
+- В рабочем цикле делает **постоянный рескан JSON** перед каждым действием.
+- Нажимает действие из JSON в **рандомное время от 3 до 12 секунд** (или ваш диапазон).
 
 ## Запуск
 
@@ -15,41 +16,34 @@ dotnet restore
 dotnet run --project TTWWorker -- scenario.json
 ```
 
+## Пункт управления
+
+- `1` — запустить автоматизацию
+- `2` — быстрая настройка простой автоматизации
+- `3` — показать текущий JSON
+- `0` — выход
+
 ## Пример `scenario.json`
 
 ```json
 {
-  "name": "TikTok: листание ленты в новом окне",
   "startUrl": "https://www.tiktok.com/foryou",
-  "loginWaitSeconds": 5,
-  "slowMoMs": 60,
-  "browser": {
-    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
-    "launchMode": "cdp",
-    "cdpPort": 9222,
-    "keepBrowserOpen": false,
-    "forceNewWindow": true,
-    "additionalArgs": []
-  },
-  "steps": [
-    { "action": "wait", "durationMs": 2000 },
-    { "action": "keyPress", "key": "ArrowDown", "afterDelayMs": 2200, "repeat": 20 }
-  ]
+  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+  "automation": {
+    "minDelaySeconds": 3,
+    "maxDelaySeconds": 12,
+    "actionType": "keyPress",
+    "key": "ArrowDown",
+    "selector": ""
+  }
 }
 ```
 
-## browser-поля
+## Поля JSON
 
-- `executablePath` — путь к `browser.exe`
-- `launchMode` — `cdp` (по умолчанию) или `persistent`
-- `cdpPort` — CDP порт
-- `forceNewWindow` — запуск отдельного окна
-- `keepBrowserOpen` — не закрывать браузер после сценария
-- `additionalArgs` — дополнительные аргументы запуска
-
-## Поддерживаемые шаги
-
-- `wait`
-- `keyPress`
-- `click`
-- `navigate`
+- `startUrl` — стартовый URL
+- `browserExecutablePath` — путь к `browser.exe`
+- `automation.minDelaySeconds` / `automation.maxDelaySeconds` — диапазон случайной задержки
+- `automation.actionType` — `keyPress` или `click`
+- `automation.key` — клавиша для `keyPress` (например `ArrowDown`)
+- `automation.selector` — CSS-селектор кнопки для `click` (если используете кнопку справа ниже центра)

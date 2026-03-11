@@ -1,26 +1,11 @@
 {
-  "name": "TikTok: листание ленты в новом окне",
   "startUrl": "https://www.tiktok.com/foryou",
-  "loginWaitSeconds": 5,
-  "slowMoMs": 60,
-  "browser": {
-    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
-    "launchMode": "cdp",
-    "cdpPort": 9222,
-    "keepBrowserOpen": false,
-    "forceNewWindow": true,
-    "additionalArgs": []
-  },
-  "steps": [
-    {
-      "action": "wait",
-      "durationMs": 2000
-    },
-    {
-      "action": "keyPress",
-      "key": "ArrowDown",
-      "afterDelayMs": 2200,
-      "repeat": 20
-    }
-  ]
+  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+  "automation": {
+    "minDelaySeconds": 3,
+    "maxDelaySeconds": 12,
+    "actionType": "keyPress",
+    "key": "ArrowDown",
+    "selector": ""
+  }
 }
