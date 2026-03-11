@@ -1,16 +1,15 @@
 # TTWWorker
 
-Упрощённая автоматизация TikTok через **пункт управления в консоли** с постоянным ресканом `scenario.json`.
+Консольная автоматизация TikTok с управлением в реальном времени, ресканом JSON и независимыми профилями браузера.
 
-## Что теперь делает программа
+## Главное
 
-- Запускается как консольный пульт (`1/2/3/0`).
-- При запуске автоматизации открывает **новое окно браузера** с временным профилем.
-- В рабочем цикле делает **постоянный рескан JSON** перед каждым действием.
-- Нажимает действие из JSON в **рандомное время от 3 до 12 секунд** (или ваш диапазон).
-- При запущенной автоматизации принимает команды из консоли в любой момент:
-  - `like` — поставить лайк (нажимается клавиша из `automation.likeKey`, по умолчанию `KeyL`)
-  - `stop` — остановить автоматизацию
+- Перед запуском выбирается профиль (`Profile 1`, `Profile 2`, ...).
+- Можно создавать новые профили — каждый профиль это отдельная независимая сессия браузера.
+- Автоматизация постоянно перечитывает `scenario.json` в цикле.
+- Во время работы доступны команды:
+  - `like` — поставить лайк сразу
+  - `stop` — остановить работу
 
 ## Запуск
 
@@ -21,10 +20,19 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Пункт управления
 
-- `1` — запустить автоматизацию
-- `2` — быстрая настройка простой автоматизации
+- `1` — запуск автоматизации (с выбором профиля)
+- `2` — настройка автоматизации через консоль
 - `3` — показать текущий JSON
+- `4` — управление профилями (создание/удаление)
 - `0` — выход
+
+## Настройки автоматизации (как в старой логике)
+
+- `workDurationMinutes` — время работы в минутах
+- `scrollDelayMinSeconds` / `scrollDelayMaxSeconds` — задержка между листаниями
+- `likesPerPeriod` — количество лайков за период
+- `likePeriodMinutes` — длина периода лайков
+- лайки в периоде распределяются случайно по времени
 
 ## Пример `scenario.json`
 
@@ -33,22 +41,15 @@ dotnet run --project TTWWorker -- scenario.json
   "startUrl": "https://www.tiktok.com/foryou",
   "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
   "automation": {
-    "minDelaySeconds": 3,
-    "maxDelaySeconds": 12,
-    "actionType": "keyPress",
-    "key": "ArrowDown",
-    "selector": "",
+    "workDurationMinutes": 60,
+    "scrollDelayMinSeconds": 3,
+    "scrollDelayMaxSeconds": 12,
+    "scrollActionType": "keyPress",
+    "scrollKey": "ArrowDown",
+    "scrollSelector": "",
+    "likesPerPeriod": 2,
+    "likePeriodMinutes": 10,
     "likeKey": "KeyL"
   }
 }
 ```
-
-## Поля JSON
-
-- `startUrl` — стартовый URL
-- `browserExecutablePath` — путь к `browser.exe`
-- `automation.minDelaySeconds` / `automation.maxDelaySeconds` — диапазон случайной задержки
-- `automation.actionType` — `keyPress` или `click`
-- `automation.key` — клавиша для `keyPress` (например `ArrowDown`)
-- `automation.selector` — CSS-селектор кнопки для `click` (если используете кнопку справа ниже центра)
-- `automation.likeKey` — клавиша для команды `like` (по умолчанию `KeyL`)

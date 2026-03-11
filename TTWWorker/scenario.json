@@ -2,11 +2,14 @@
   "startUrl": "https://www.tiktok.com/foryou",
   "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
   "automation": {
-    "minDelaySeconds": 3,
-    "maxDelaySeconds": 12,
-    "actionType": "keyPress",
-    "key": "ArrowDown",
-    "selector": "",
+    "workDurationMinutes": 60,
+    "scrollDelayMinSeconds": 3,
+    "scrollDelayMaxSeconds": 12,
+    "scrollActionType": "keyPress",
+    "scrollKey": "ArrowDown",
+    "scrollSelector": "",
+    "likesPerPeriod": 2,
+    "likePeriodMinutes": 10,
     "likeKey": "KeyL"
   }
 }
