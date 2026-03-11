@@ -7,7 +7,11 @@
     "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default",
-    "useProfileClone": true
+    "launchMode": "cdp",
+    "cdpPort": 9222,
+    "keepBrowserOpen": false,
+    "useProfileClone": true,
+    "additionalArgs": []
   },
   "steps": [
     {

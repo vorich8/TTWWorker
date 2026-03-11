@@ -1,14 +1,12 @@
 # TTWWorker
 
-JSON-раннер автоматизации TikTok с запуском через **Яндекс.Браузер** и сохранённый профиль.
+JSON-раннер автоматизации TikTok через Яндекс.Браузер.
 
-## Что изменено
+## Почему был фикс
 
-Проект запускает установленный в системе Яндекс.Браузер в persistent-режиме Playwright и использует папку профилей (`User Data`) + имя профиля (`Default`, `Profile 1` и т.д.) из `scenario.json`.
+Проблема `Target page, context or browser has been closed` часто возникает на `LaunchPersistentContextAsync` из-за набора флагов запуска/блокировки профиля.
 
-Если путь в `browser.executablePath` не найден, раннер пробует типовые пути установки автоматически и выводит список проверенных путей в лог.
-
-Если браузер/контекст закрывается на старте (например, профиль заблокирован уже запущенным браузером), раннер автоматически делает **временную копию профиля** и повторяет запуск.
+Теперь по умолчанию используется режим **CDP**: раннер поднимает (или использует уже поднятый) браузер с `--remote-debugging-port` и подключается через `ConnectOverCDPAsync`, что обычно стабильнее для локального установленного Яндекс.Браузера.
 
 ## Запуск
 
@@ -29,7 +27,11 @@ dotnet run --project TTWWorker -- scenario.json
     "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default",
-    "useProfileClone": true
+    "launchMode": "cdp",
+    "cdpPort": 9222,
+    "keepBrowserOpen": false,
+    "useProfileClone": true,
+    "additionalArgs": []
   },
   "steps": [
     { "action": "wait", "durationMs": 2000 },
@@ -38,24 +40,21 @@ dotnet run --project TTWWorker -- scenario.json
 }
 ```
 
-### Поля browser
+## browser-поля
 
-- `executablePath` — путь к `browser.exe`/`yandex.exe` (поддерживаются `%ENV%` переменные)
-- `userDataDir` — путь к `User Data`
-- `profileDirectoryName` — имя профиля (`Default`, `Profile 1`, ...)
-- `useProfileClone` — включить fallback-запуск через копию профиля при ошибке старта
+- `launchMode`: `cdp` (по умолчанию) или `persistent`
+- `cdpPort`: порт CDP (например `9222`)
+- `keepBrowserOpen`: не закрывать процесс браузера после сценария
+- `useProfileClone`: fallback копия профиля для `persistent`-режима
+- `additionalArgs`: дополнительные аргументы запуска браузера
 
 ## Поддерживаемые шаги
 
-- `wait` — ожидание `durationMs`
-- `keyPress` — нажатие клавиши `key`
-- `click` — клик по CSS-селектору `selector`
-- `navigate` — переход по URL `url`
-
-Общие поля шага:
-- `afterDelayMs`
-- `repeat`
+- `wait`
+- `keyPress`
+- `click`
+- `navigate`
 
 ## Логи
 
-Все основные сообщения раннера выводятся на русском языке (загрузка сценария, найденные пути браузера, fallback-режим запуска, выполнение шагов, ошибки валидации).
+Логи и ошибки — на русском, включая диагностику путей браузера и режима запуска.

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Playwright;
@@ -43,7 +44,6 @@ if (!BrowserPathResolver.TryResolveExecutablePath(scenario.Browser.ExecutablePat
         Console.WriteLine($" - {path}");
     }
 
-    Console.WriteLine("Укажи рабочий путь в browser.executablePath или установи Яндекс.Браузер.");
     return;
 }
 
@@ -56,7 +56,6 @@ if (!BrowserPathResolver.TryResolveUserDataDir(scenario.Browser.UserDataDir, out
         Console.WriteLine($" - {path}");
     }
 
-    Console.WriteLine("Укажи рабочий путь в browser.userDataDir.");
     return;
 }
 
@@ -65,111 +64,248 @@ Console.WriteLine($"Шагов в сценарии: {scenario.Steps.Count}");
 Console.WriteLine($"Браузер: {executablePath}");
 Console.WriteLine($"Папка профилей: {userDataDir}");
 Console.WriteLine($"Профиль: {scenario.Browser.ProfileDirectoryName}");
+Console.WriteLine($"Режим запуска: {scenario.Browser.LaunchMode}");
 
 using var playwright = await Playwright.CreateAsync();
-
-string? tempUserDataDir = null;
-IBrowserContext? context = null;
+BrowserSession? session = null;
 
 try
 {
-    context = await LaunchWithFallbackAsync(playwright, scenario, executablePath, userDataDir);
-    var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+    session = await BrowserLauncher.LaunchAsync(playwright, scenario, executablePath, userDataDir);
 
     Console.WriteLine($"Переход на: {scenario.StartUrl}");
-    await page.GotoAsync(scenario.StartUrl);
+    await session.Page.GotoAsync(scenario.StartUrl);
 
     if (scenario.LoginWaitSeconds > 0)
     {
         Console.WriteLine($"Ожидание перед стартом: {scenario.LoginWaitSeconds} сек.");
-        await page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
+        await session.Page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
     }
 
-    var runner = new ScenarioRunner(page);
+    var runner = new ScenarioRunner(session.Page);
     await runner.RunAsync(scenario);
 
     Console.WriteLine("Сценарий выполнен.");
 }
-catch (PlaywrightException ex)
+catch (Exception ex) when (ex is PlaywrightException or InvalidOperationException)
 {
-    Console.WriteLine("Ошибка Playwright при запуске/выполнении сценария.");
+    Console.WriteLine("Ошибка запуска/выполнения сценария.");
     Console.WriteLine(ex.Message);
-    Console.WriteLine("Подсказка: закрой все окна Яндекс.Браузера и попробуй снова.");
-    Console.WriteLine("Если проблема повторяется, оставь browser.useProfileClone=true (или включи его) для запуска через копию профиля.");
+    Console.WriteLine("Подсказка: в режиме cdp закрой старые браузеры или смени cdpPort.");
     return;
 }
 finally
 {
-    if (context is not null)
+    if (session is not null)
     {
-        await context.CloseAsync();
-    }
-
-    tempUserDataDir = ProfileCloneStore.LastTempUserDataDir;
-    if (!string.IsNullOrWhiteSpace(tempUserDataDir) && Directory.Exists(tempUserDataDir))
-    {
-        TryDeleteDirectory(tempUserDataDir);
+        await session.DisposeAsync();
     }
 }
 
-async Task<IBrowserContext> LaunchWithFallbackAsync(IPlaywright playwrightInstance, ScenarioDefinition scenarioDefinition, string browserExePath, string baseUserDataDir)
+internal static class BrowserLauncher
 {
-    try
+    public static async Task<BrowserSession> LaunchAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
     {
-        Console.WriteLine("Запуск браузера с основным профилем...");
-        return await LaunchContextAsync(playwrightInstance, scenarioDefinition, browserExePath, baseUserDataDir);
-    }
-    catch (PlaywrightException ex) when (scenarioDefinition.Browser.UseProfileClone)
-    {
-        Console.WriteLine("Основной запуск не удался. Пробую запуск через временную копию профиля...");
-        Console.WriteLine($"Причина: {ex.Message}");
-
-        var cloneUserDataDir = ProfileCloneStore.CreateProfileClone(baseUserDataDir, scenarioDefinition.Browser.ProfileDirectoryName);
-        Console.WriteLine($"Временная копия профиля создана: {cloneUserDataDir}");
-
-        return await LaunchContextAsync(playwrightInstance, scenarioDefinition, browserExePath, cloneUserDataDir);
-    }
-}
-
-async Task<IBrowserContext> LaunchContextAsync(IPlaywright playwrightInstance, ScenarioDefinition scenarioDefinition, string browserExePath, string resolvedUserDataDir)
-{
-    var launchArgs = new List<string>();
-    if (!string.IsNullOrWhiteSpace(scenarioDefinition.Browser.ProfileDirectoryName))
-    {
-        launchArgs.Add($"--profile-directory={scenarioDefinition.Browser.ProfileDirectoryName}");
+        return scenario.Browser.LaunchMode switch
+        {
+            BrowserLaunchMode.Cdp => await LaunchCdpAsync(playwright, scenario, executablePath, userDataDir),
+            BrowserLaunchMode.Persistent => await LaunchPersistentWithFallbackAsync(playwright, scenario, executablePath, userDataDir),
+            _ => throw new InvalidOperationException($"Неизвестный launchMode: {scenario.Browser.LaunchMode}"),
+        };
     }
 
-    launchArgs.Add("--no-first-run");
-    launchArgs.Add("--no-default-browser-check");
+    private static async Task<BrowserSession> LaunchPersistentWithFallbackAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    {
+        try
+        {
+            Console.WriteLine("Запуск Playwright persistent...");
+            var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, userDataDir);
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+            return new BrowserSession(page, async () => await context.CloseAsync());
+        }
+        catch (PlaywrightException ex) when (scenario.Browser.UseProfileClone)
+        {
+            Console.WriteLine("Persistent не удался. Пробую копию профиля...");
+            Console.WriteLine($"Причина: {ex.Message}");
 
-    return await playwrightInstance.Chromium.LaunchPersistentContextAsync(
-        userDataDir: resolvedUserDataDir,
-        new BrowserTypeLaunchPersistentContextOptions
+            var cloneDir = ProfileCloneStore.CreateProfileClone(userDataDir, scenario.Browser.ProfileDirectoryName);
+            var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, cloneDir);
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+
+            return new BrowserSession(page, async () =>
+            {
+                await context.CloseAsync();
+                ProfileCloneStore.TryDeleteDirectory(cloneDir);
+            });
+        }
+    }
+
+    private static async Task<IBrowserContext> LaunchPersistentContextAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    {
+        var args = BuildCommonArgs(scenario.Browser.ProfileDirectoryName, scenario.Browser.AdditionalArgs);
+
+        return await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
         {
             Headless = false,
-            SlowMo = scenarioDefinition.SlowMoMs,
-            ExecutablePath = browserExePath,
-            Args = launchArgs,
+            SlowMo = scenario.SlowMoMs,
+            ExecutablePath = executablePath,
+            Args = args,
             ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
         });
+    }
+
+    private static async Task<BrowserSession> LaunchCdpAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    {
+        var port = scenario.Browser.CdpPort;
+        var endpoint = $"http://127.0.0.1:{port}";
+
+        Process? process = null;
+
+        if (!await CdpProbe.IsEndpointReadyAsync(port))
+        {
+            Console.WriteLine($"CDP endpoint {endpoint} не найден. Запускаю Яндекс.Браузер вручную...");
+            process = StartBrowserProcess(executablePath, userDataDir, scenario);
+            await CdpProbe.WaitUntilReadyAsync(port, 15000);
+        }
+        else
+        {
+            Console.WriteLine($"Использую уже доступный CDP endpoint: {endpoint}");
+        }
+
+        try
+        {
+            var browser = await playwright.Chromium.ConnectOverCDPAsync(endpoint);
+            var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+
+            return new BrowserSession(page, async () =>
+            {
+                await browser.CloseAsync();
+
+                if (process is not null && !scenario.Browser.KeepBrowserOpen)
+                {
+                    TryKill(process);
+                }
+            });
+        }
+        catch
+        {
+            if (process is not null && !scenario.Browser.KeepBrowserOpen)
+            {
+                TryKill(process);
+            }
+
+            throw;
+        }
+    }
+
+    private static Process StartBrowserProcess(string executablePath, string userDataDir, ScenarioDefinition scenario)
+    {
+        var startInfo = new ProcessStartInfo(executablePath)
+        {
+            UseShellExecute = false,
+        };
+
+        startInfo.ArgumentList.Add($"--remote-debugging-port={scenario.Browser.CdpPort}");
+        startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
+        startInfo.ArgumentList.Add($"--profile-directory={scenario.Browser.ProfileDirectoryName}");
+        startInfo.ArgumentList.Add("--no-first-run");
+        startInfo.ArgumentList.Add("--no-default-browser-check");
+
+        foreach (var arg in scenario.Browser.AdditionalArgs)
+        {
+            if (!string.IsNullOrWhiteSpace(arg))
+            {
+                startInfo.ArgumentList.Add(arg);
+            }
+        }
+
+        startInfo.ArgumentList.Add("about:blank");
+
+        var process = Process.Start(startInfo);
+        if (process is null)
+        {
+            throw new InvalidOperationException("Не удалось запустить процесс браузера.");
+        }
+
+        Console.WriteLine($"Браузер запущен вручную. PID: {process.Id}");
+        return process;
+    }
+
+    private static List<string> BuildCommonArgs(string profileDirectoryName, List<string> additionalArgs)
+    {
+        var args = new List<string>
+        {
+            "--no-first-run",
+            "--no-default-browser-check",
+            $"--profile-directory={profileDirectoryName}",
+        };
+
+        args.AddRange(additionalArgs.Where(x => !string.IsNullOrWhiteSpace(x)));
+        return args;
+    }
+
+    private static void TryKill(Process process)
+    {
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch
+        {
+            // ignore
+        }
+    }
 }
 
-void TryDeleteDirectory(string path)
+internal static class CdpProbe
 {
-    try
+    public static async Task<bool> IsEndpointReadyAsync(int port)
     {
-        Directory.Delete(path, recursive: true);
+        using var client = new HttpClient { Timeout = TimeSpan.FromSeconds(1) };
+
+        try
+        {
+            using var response = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
+            return response.IsSuccessStatusCode;
+        }
+        catch
+        {
+            return false;
+        }
     }
-    catch
+
+    public static async Task WaitUntilReadyAsync(int port, int timeoutMs)
     {
-        Console.WriteLine($"Не удалось удалить временную папку профиля: {path}");
+        var started = DateTime.UtcNow;
+
+        while ((DateTime.UtcNow - started).TotalMilliseconds < timeoutMs)
+        {
+            if (await IsEndpointReadyAsync(port))
+            {
+                return;
+            }
+
+            await Task.Delay(300);
+        }
+
+        throw new InvalidOperationException($"CDP endpoint не поднялся за {timeoutMs} мс на порту {port}.");
     }
+}
+
+internal sealed class BrowserSession(IPage page, Func<Task> dispose)
+{
+    private readonly Func<Task> _dispose = dispose;
+    public IPage Page { get; } = page;
+
+    public Task DisposeAsync() => _dispose();
 }
 
 internal static class ProfileCloneStore
 {
-    public static string? LastTempUserDataDir { get; private set; }
-
     public static string CreateProfileClone(string sourceUserDataDir, string profileDirectoryName)
     {
         var tempRoot = Path.Combine(Path.GetTempPath(), "TTWWorker", $"profile-clone-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
@@ -190,8 +326,22 @@ internal static class ProfileCloneStore
             File.Copy(localStatePath, Path.Combine(tempRoot, "Local State"), overwrite: true);
         }
 
-        LastTempUserDataDir = tempRoot;
         return tempRoot;
+    }
+
+    public static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+            {
+                Directory.Delete(path, recursive: true);
+            }
+        }
+        catch
+        {
+            Console.WriteLine($"Не удалось удалить временную папку профиля: {path}");
+        }
     }
 
     private static void CopyDirectory(string sourceDir, string destinationDir)
@@ -370,7 +520,17 @@ internal sealed class BrowserDefinition
     public string ExecutablePath { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe";
     public string UserDataDir { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data";
     public string ProfileDirectoryName { get; init; } = "Default";
+    public BrowserLaunchMode LaunchMode { get; init; } = BrowserLaunchMode.Cdp;
+    public int CdpPort { get; init; } = 9222;
+    public bool KeepBrowserOpen { get; init; }
     public bool UseProfileClone { get; init; } = true;
+    public List<string> AdditionalArgs { get; init; } = [];
+}
+
+internal enum BrowserLaunchMode
+{
+    Cdp,
+    Persistent,
 }
 
 internal sealed class StepDefinition
