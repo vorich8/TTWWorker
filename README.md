@@ -8,6 +8,8 @@ JSON-раннер автоматизации TikTok с запуском чере
 
 Если путь в `browser.executablePath` не найден, раннер пробует типовые пути установки автоматически и выводит список проверенных путей в лог.
 
+Если браузер/контекст закрывается на старте (например, профиль заблокирован уже запущенным браузером), раннер автоматически делает **временную копию профиля** и повторяет запуск.
+
 ## Запуск
 
 ```bash
@@ -26,7 +28,8 @@ dotnet run --project TTWWorker -- scenario.json
   "browser": {
     "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
-    "profileDirectoryName": "Default"
+    "profileDirectoryName": "Default",
+    "useProfileClone": true
   },
   "steps": [
     { "action": "wait", "durationMs": 2000 },
@@ -34,6 +37,13 @@ dotnet run --project TTWWorker -- scenario.json
   ]
 }
 ```
+
+### Поля browser
+
+- `executablePath` — путь к `browser.exe`/`yandex.exe` (поддерживаются `%ENV%` переменные)
+- `userDataDir` — путь к `User Data`
+- `profileDirectoryName` — имя профиля (`Default`, `Profile 1`, ...)
+- `useProfileClone` — включить fallback-запуск через копию профиля при ошибке старта
 
 ## Поддерживаемые шаги
 
@@ -48,4 +58,4 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Логи
 
-Все основные сообщения раннера выводятся на русском языке (загрузка сценария, найденные пути браузера, выполнение шагов, ошибки валидации).
+Все основные сообщения раннера выводятся на русском языке (загрузка сценария, найденные пути браузера, fallback-режим запуска, выполнение шагов, ошибки валидации).

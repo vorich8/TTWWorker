@@ -68,38 +68,151 @@ Console.WriteLine($"Профиль: {scenario.Browser.ProfileDirectoryName}");
 
 using var playwright = await Playwright.CreateAsync();
 
-var launchArgs = new List<string>();
-if (!string.IsNullOrWhiteSpace(scenario.Browser.ProfileDirectoryName))
-{
-    launchArgs.Add($"--profile-directory={scenario.Browser.ProfileDirectoryName}");
-}
+string? tempUserDataDir = null;
+IBrowserContext? context = null;
 
-await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
-    userDataDir: userDataDir,
-    new BrowserTypeLaunchPersistentContextOptions
+try
+{
+    context = await LaunchWithFallbackAsync(playwright, scenario, executablePath, userDataDir);
+    var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+
+    Console.WriteLine($"Переход на: {scenario.StartUrl}");
+    await page.GotoAsync(scenario.StartUrl);
+
+    if (scenario.LoginWaitSeconds > 0)
     {
-        Headless = false,
-        SlowMo = scenario.SlowMoMs,
-        ExecutablePath = executablePath,
-        Args = launchArgs,
-        ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
-    });
+        Console.WriteLine($"Ожидание перед стартом: {scenario.LoginWaitSeconds} сек.");
+        await page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
+    }
 
-var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+    var runner = new ScenarioRunner(page);
+    await runner.RunAsync(scenario);
 
-Console.WriteLine($"Переход на: {scenario.StartUrl}");
-await page.GotoAsync(scenario.StartUrl);
-
-if (scenario.LoginWaitSeconds > 0)
+    Console.WriteLine("Сценарий выполнен.");
+}
+catch (PlaywrightException ex)
 {
-    Console.WriteLine($"Ожидание перед стартом: {scenario.LoginWaitSeconds} сек.");
-    await page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
+    Console.WriteLine("Ошибка Playwright при запуске/выполнении сценария.");
+    Console.WriteLine(ex.Message);
+    Console.WriteLine("Подсказка: закрой все окна Яндекс.Браузера и попробуй снова.");
+    Console.WriteLine("Если проблема повторяется, оставь browser.useProfileClone=true (или включи его) для запуска через копию профиля.");
+    return;
+}
+finally
+{
+    if (context is not null)
+    {
+        await context.CloseAsync();
+    }
+
+    tempUserDataDir = ProfileCloneStore.LastTempUserDataDir;
+    if (!string.IsNullOrWhiteSpace(tempUserDataDir) && Directory.Exists(tempUserDataDir))
+    {
+        TryDeleteDirectory(tempUserDataDir);
+    }
 }
 
-var runner = new ScenarioRunner(page);
-await runner.RunAsync(scenario);
+async Task<IBrowserContext> LaunchWithFallbackAsync(IPlaywright playwrightInstance, ScenarioDefinition scenarioDefinition, string browserExePath, string baseUserDataDir)
+{
+    try
+    {
+        Console.WriteLine("Запуск браузера с основным профилем...");
+        return await LaunchContextAsync(playwrightInstance, scenarioDefinition, browserExePath, baseUserDataDir);
+    }
+    catch (PlaywrightException ex) when (scenarioDefinition.Browser.UseProfileClone)
+    {
+        Console.WriteLine("Основной запуск не удался. Пробую запуск через временную копию профиля...");
+        Console.WriteLine($"Причина: {ex.Message}");
 
-Console.WriteLine("Сценарий выполнен.");
+        var cloneUserDataDir = ProfileCloneStore.CreateProfileClone(baseUserDataDir, scenarioDefinition.Browser.ProfileDirectoryName);
+        Console.WriteLine($"Временная копия профиля создана: {cloneUserDataDir}");
+
+        return await LaunchContextAsync(playwrightInstance, scenarioDefinition, browserExePath, cloneUserDataDir);
+    }
+}
+
+async Task<IBrowserContext> LaunchContextAsync(IPlaywright playwrightInstance, ScenarioDefinition scenarioDefinition, string browserExePath, string resolvedUserDataDir)
+{
+    var launchArgs = new List<string>();
+    if (!string.IsNullOrWhiteSpace(scenarioDefinition.Browser.ProfileDirectoryName))
+    {
+        launchArgs.Add($"--profile-directory={scenarioDefinition.Browser.ProfileDirectoryName}");
+    }
+
+    launchArgs.Add("--no-first-run");
+    launchArgs.Add("--no-default-browser-check");
+
+    return await playwrightInstance.Chromium.LaunchPersistentContextAsync(
+        userDataDir: resolvedUserDataDir,
+        new BrowserTypeLaunchPersistentContextOptions
+        {
+            Headless = false,
+            SlowMo = scenarioDefinition.SlowMoMs,
+            ExecutablePath = browserExePath,
+            Args = launchArgs,
+            ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
+        });
+}
+
+void TryDeleteDirectory(string path)
+{
+    try
+    {
+        Directory.Delete(path, recursive: true);
+    }
+    catch
+    {
+        Console.WriteLine($"Не удалось удалить временную папку профиля: {path}");
+    }
+}
+
+internal static class ProfileCloneStore
+{
+    public static string? LastTempUserDataDir { get; private set; }
+
+    public static string CreateProfileClone(string sourceUserDataDir, string profileDirectoryName)
+    {
+        var tempRoot = Path.Combine(Path.GetTempPath(), "TTWWorker", $"profile-clone-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
+        Directory.CreateDirectory(tempRoot);
+
+        var sourceProfileDir = Path.Combine(sourceUserDataDir, profileDirectoryName);
+        if (!Directory.Exists(sourceProfileDir))
+        {
+            throw new DirectoryNotFoundException($"Папка профиля не найдена: {sourceProfileDir}");
+        }
+
+        var targetProfileDir = Path.Combine(tempRoot, profileDirectoryName);
+        CopyDirectory(sourceProfileDir, targetProfileDir);
+
+        var localStatePath = Path.Combine(sourceUserDataDir, "Local State");
+        if (File.Exists(localStatePath))
+        {
+            File.Copy(localStatePath, Path.Combine(tempRoot, "Local State"), overwrite: true);
+        }
+
+        LastTempUserDataDir = tempRoot;
+        return tempRoot;
+    }
+
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        Directory.CreateDirectory(destinationDir);
+
+        foreach (var file in Directory.GetFiles(sourceDir))
+        {
+            var fileName = Path.GetFileName(file);
+            var destinationFile = Path.Combine(destinationDir, fileName);
+            File.Copy(file, destinationFile, overwrite: true);
+        }
+
+        foreach (var directory in Directory.GetDirectories(sourceDir))
+        {
+            var directoryName = Path.GetFileName(directory);
+            var destinationSubDir = Path.Combine(destinationDir, directoryName);
+            CopyDirectory(directory, destinationSubDir);
+        }
+    }
+}
 
 internal static class BrowserPathResolver
 {
@@ -257,6 +370,7 @@ internal sealed class BrowserDefinition
     public string ExecutablePath { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe";
     public string UserDataDir { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data";
     public string ProfileDirectoryName { get; init; } = "Default";
+    public bool UseProfileClone { get; init; } = true;
 }
 
 internal sealed class StepDefinition

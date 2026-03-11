@@ -6,7 +6,8 @@
   "browser": {
     "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
-    "profileDirectoryName": "Default"
+    "profileDirectoryName": "Default",
+    "useProfileClone": true
   },
   "steps": [
     {
