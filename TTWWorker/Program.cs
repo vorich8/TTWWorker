@@ -63,6 +63,13 @@ internal sealed class ControlPanel(string configPath)
     private async Task ConfigureAutomationAsync()
     {
         var config = LoadConfig();
+        ConfigureAutomationValues(config);
+        await SaveConfigAsync(config);
+        Console.WriteLine("Настройки автоматизации сохранены.");
+    }
+
+    private void ConfigureAutomationValues(AppConfig config)
+    {
         var a = config.Automation;
 
         Console.Write($"URL (сейчас: {config.StartUrl}): ");
@@ -104,9 +111,6 @@ internal sealed class ControlPanel(string configPath)
         Console.Write($"Клавиша лайка (сейчас: {a.LikeKey}): ");
         var likeKey = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(likeKey)) a.LikeKey = likeKey;
-
-        await SaveConfigAsync(config);
-        Console.WriteLine("Настройки автоматизации сохранены.");
     }
 
     private void ManageProfiles()
@@ -201,15 +205,20 @@ internal sealed class ControlPanel(string configPath)
 
     private async Task RunAutomationAsync()
     {
+        var selectedProfile = SelectProfileForRun();
+        Console.WriteLine($"Выбран профиль: {selectedProfile.Name}");
+
         var initialConfig = LoadConfig();
+        Console.WriteLine("Теперь настройте параметры автоматизации перед запуском.");
+        ConfigureAutomationValues(initialConfig);
+        await SaveConfigAsync(initialConfig);
+        Console.WriteLine("Настройки сохранены, запускаю автоматизацию...");
+
         if (!File.Exists(initialConfig.BrowserExecutablePath))
         {
             Console.WriteLine($"Браузер не найден: {initialConfig.BrowserExecutablePath}");
             return;
         }
-
-        var selectedProfile = SelectProfileForRun();
-        Console.WriteLine($"Запуск с профилем: {selectedProfile.Name}");
 
         using var playwright = await Playwright.CreateAsync();
 
