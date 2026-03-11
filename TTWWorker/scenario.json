@@ -1,8 +1,13 @@
 {
-  "name": "TikTok: open and scroll videos",
+  "name": "TikTok: листание ленты через профиль Яндекс.Браузера",
   "startUrl": "https://www.tiktok.com/foryou",
-  "loginWaitSeconds": 30,
-  "slowMoMs": 80,
+  "loginWaitSeconds": 5,
+  "slowMoMs": 60,
+  "browser": {
+    "executablePath": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/Application/browser.exe",
+    "userDataDir": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/User Data",
+    "profileDirectoryName": "Default"
+  },
   "steps": [
     {
       "action": "wait",
@@ -11,7 +16,7 @@
     {
       "action": "keyPress",
       "key": "ArrowDown",
-      "afterDelayMs": 2500,
+      "afterDelayMs": 2200,
       "repeat": 20
     }
   ]

@@ -7,8 +7,8 @@ var scenarioPath = args.FirstOrDefault() ?? defaultScenarioPath;
 
 if (!File.Exists(scenarioPath))
 {
-    Console.WriteLine($"Scenario file not found: {scenarioPath}");
-    Console.WriteLine("Usage: dotnet run -- <path-to-scenario.json>");
+    Console.WriteLine($"Файл сценария не найден: {scenarioPath}");
+    Console.WriteLine("Пример запуска: dotnet run -- <путь-к-scenario.json>");
     return;
 }
 
@@ -24,45 +24,79 @@ var scenario = JsonSerializer.Deserialize<ScenarioDefinition>(json, options);
 
 if (scenario is null)
 {
-    Console.WriteLine("Unable to parse scenario JSON.");
+    Console.WriteLine("Не удалось разобрать JSON сценария.");
     return;
 }
 
 if (string.IsNullOrWhiteSpace(scenario.StartUrl))
 {
-    Console.WriteLine("StartUrl is required in scenario JSON.");
+    Console.WriteLine("В сценарии обязательно поле StartUrl.");
     return;
 }
 
-Console.WriteLine($"Loaded scenario: {scenario.Name}");
-Console.WriteLine($"Steps: {scenario.Steps.Count}");
+if (string.IsNullOrWhiteSpace(scenario.Browser.ExecutablePath))
+{
+    Console.WriteLine("В сценарии обязательно поле browser.executablePath (путь к yandex.exe). ");
+    return;
+}
+
+if (!File.Exists(scenario.Browser.ExecutablePath))
+{
+    Console.WriteLine($"Исполняемый файл браузера не найден: {scenario.Browser.ExecutablePath}");
+    return;
+}
+
+if (string.IsNullOrWhiteSpace(scenario.Browser.UserDataDir))
+{
+    Console.WriteLine("В сценарии обязательно поле browser.userDataDir (путь к данным профиля браузера).");
+    return;
+}
+
+if (!Directory.Exists(scenario.Browser.UserDataDir))
+{
+    Console.WriteLine($"Папка userDataDir не найдена: {scenario.Browser.UserDataDir}");
+    return;
+}
+
+Console.WriteLine($"Сценарий загружен: {scenario.Name}");
+Console.WriteLine($"Шагов в сценарии: {scenario.Steps.Count}");
+Console.WriteLine($"Браузер: {scenario.Browser.ExecutablePath}");
+Console.WriteLine($"Профиль: {scenario.Browser.ProfileDirectoryName}");
 
 using var playwright = await Playwright.CreateAsync();
-await using var browser = await playwright.Chromium.LaunchAsync(new BrowserTypeLaunchOptions
-{
-    Headless = false,
-    SlowMo = scenario.SlowMoMs,
-    Channel = scenario.BrowserChannel,
-});
 
-var context = await browser.NewContextAsync(new BrowserNewContextOptions
+var launchArgs = new List<string>();
+if (!string.IsNullOrWhiteSpace(scenario.Browser.ProfileDirectoryName))
 {
-    ViewportSize = new ViewportSize { Width = 1280, Height = 900 }
-});
+    launchArgs.Add($"--profile-directory={scenario.Browser.ProfileDirectoryName}");
+}
 
-var page = await context.NewPageAsync();
+await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
+    userDataDir: scenario.Browser.UserDataDir,
+    new BrowserTypeLaunchPersistentContextOptions
+    {
+        Headless = false,
+        SlowMo = scenario.SlowMoMs,
+        ExecutablePath = scenario.Browser.ExecutablePath,
+        Args = launchArgs,
+        ViewportSize = new ViewportSize { Width = 1280, Height = 900 },
+    });
+
+var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+
+Console.WriteLine($"Переход на: {scenario.StartUrl}");
 await page.GotoAsync(scenario.StartUrl);
 
 if (scenario.LoginWaitSeconds > 0)
 {
-    Console.WriteLine($"Login wait: {scenario.LoginWaitSeconds}s (do manual auth if needed)");
+    Console.WriteLine($"Ожидание перед стартом: {scenario.LoginWaitSeconds} сек.");
     await page.WaitForTimeoutAsync(scenario.LoginWaitSeconds * 1000);
 }
 
 var runner = new ScenarioRunner(page);
 await runner.RunAsync(scenario);
 
-Console.WriteLine("Scenario completed.");
+Console.WriteLine("Сценарий выполнен.");
 
 internal sealed class ScenarioRunner(IPage page)
 {
@@ -70,8 +104,10 @@ internal sealed class ScenarioRunner(IPage page)
 
     public async Task RunAsync(ScenarioDefinition scenario)
     {
-        foreach (var step in scenario.Steps)
+        for (var index = 0; index < scenario.Steps.Count; index++)
         {
+            var step = scenario.Steps[index];
+            Console.WriteLine($"Шаг {index + 1}/{scenario.Steps.Count}: {step.Action}");
             await RunStepAsync(step);
         }
     }
@@ -105,7 +141,7 @@ internal sealed class ScenarioRunner(IPage page)
                     break;
 
                 default:
-                    throw new InvalidOperationException($"Unknown action: {step.Action}");
+                    throw new InvalidOperationException($"Неизвестное действие: {step.Action}");
             }
         }
     }
@@ -114,7 +150,7 @@ internal sealed class ScenarioRunner(IPage page)
     {
         if (string.IsNullOrWhiteSpace(value))
         {
-            throw new InvalidOperationException($"{field} is required for action '{action}'.");
+            throw new InvalidOperationException($"Поле {field} обязательно для действия '{action}'.");
         }
     }
 
@@ -129,12 +165,19 @@ internal sealed class ScenarioRunner(IPage page)
 
 internal sealed class ScenarioDefinition
 {
-    public string Name { get; init; } = "TikTok automation";
-    public string StartUrl { get; init; } = "https://www.tiktok.com/";
-    public int LoginWaitSeconds { get; init; } = 20;
+    public string Name { get; init; } = "Автоматизация TikTok";
+    public string StartUrl { get; init; } = "https://www.tiktok.com/foryou";
+    public int LoginWaitSeconds { get; init; } = 10;
     public float? SlowMoMs { get; init; }
-    public string? BrowserChannel { get; init; }
+    public BrowserDefinition Browser { get; init; } = new();
     public List<StepDefinition> Steps { get; init; } = [];
+}
+
+internal sealed class BrowserDefinition
+{
+    public string ExecutablePath { get; init; } = @"C:\\Users\\%USERNAME%\\AppData\\Local\\Yandex\\YandexBrowser\\Application\\browser.exe";
+    public string UserDataDir { get; init; } = @"C:\\Users\\%USERNAME%\\AppData\\Local\\Yandex\\YandexBrowser\\User Data";
+    public string ProfileDirectoryName { get; init; } = "Default";
 }
 
 internal sealed class StepDefinition

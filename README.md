@@ -1,50 +1,51 @@
 # TTWWorker
 
-JSON-driven TikTok automation worker.
+JSON-раннер автоматизации TikTok с запуском через **Яндекс.Браузер** и сохранённый профиль.
 
-## What changed
+## Что изменено
 
-Project now runs automation steps from `scenario.json` and executes them in a separate visible browser window using Playwright.
+Проект больше не зависит от скачанного Playwright Chromium для запуска сценария: теперь используется установленный в системе `browser.exe` Яндекс.Браузера, `userDataDir` и имя профиля (`Default`, `Profile 1` и т.д.) из `scenario.json`.
 
-## Run
+Это позволяет использовать уже сохранённую сессию (авторизацию) профиля.
+
+## Запуск
 
 ```bash
 dotnet restore
-cd TTWWorker
-pwsh bin/Debug/net10.0/playwright.ps1 install chromium
-# or after publish/build use the generated playwright script in output folder
-
-dotnet run -- scenario.json
+dotnet run --project TTWWorker -- scenario.json
 ```
 
-You can pass a custom file:
-
-```bash
-dotnet run -- my-scenario.json
-```
-
-## JSON format
+## Формат `scenario.json`
 
 ```json
 {
-  "name": "TikTok: open and scroll videos",
+  "name": "TikTok: листание ленты через профиль Яндекс.Браузера",
   "startUrl": "https://www.tiktok.com/foryou",
-  "loginWaitSeconds": 30,
-  "slowMoMs": 80,
+  "loginWaitSeconds": 5,
+  "slowMoMs": 60,
+  "browser": {
+    "executablePath": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/Application/browser.exe",
+    "userDataDir": "C:/Users/Administrator/AppData/Local/Yandex/YandexBrowser/User Data",
+    "profileDirectoryName": "Default"
+  },
   "steps": [
     { "action": "wait", "durationMs": 2000 },
-    { "action": "keyPress", "key": "ArrowDown", "afterDelayMs": 2500, "repeat": 20 }
+    { "action": "keyPress", "key": "ArrowDown", "afterDelayMs": 2200, "repeat": 20 }
   ]
 }
 ```
 
-Supported actions:
-- `wait`: waits for `durationMs`
-- `keyPress`: sends keyboard key from `key`
-- `click`: clicks element by `selector`
-- `navigate`: opens `url`
+## Поддерживаемые шаги
 
-Shared optional fields:
+- `wait` — ожидание `durationMs`
+- `keyPress` — нажатие клавиши `key`
+- `click` — клик по CSS-селектору `selector`
+- `navigate` — переход по URL `url`
+
+Общие поля шага:
 - `afterDelayMs`
 - `repeat`
 
+## Логи
+
+Все основные сообщения раннера выводятся на русском языке (загрузка сценария, запуск браузера, выполнение шагов, ошибки валидации).
