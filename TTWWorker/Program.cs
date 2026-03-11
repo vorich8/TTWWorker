@@ -156,16 +156,31 @@ internal static class BrowserLauncher
 
     private static async Task<BrowserSession> LaunchCdpAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
     {
-        var port = scenario.Browser.CdpPort;
-        var endpoint = $"http://127.0.0.1:{port}";
+        var mustStartDedicatedBrowser = scenario.Browser.ForceNewWindow;
+        var sourceUserDataDir = userDataDir;
+        var runtimeUserDataDir = userDataDir;
+
+        if (scenario.Browser.CloneProfileForCdp)
+        {
+            runtimeUserDataDir = ProfileCloneStore.CreateProfileClone(sourceUserDataDir, scenario.Browser.ProfileDirectoryName);
+            Console.WriteLine($"Для CDP создана отдельная копия профиля: {runtimeUserDataDir}");
+        }
+
+        var selectedPort = await PickPortAsync(scenario.Browser.CdpPort, mustStartDedicatedBrowser);
+        var endpoint = $"http://127.0.0.1:{selectedPort}";
 
         Process? process = null;
-
-        if (!await CdpProbe.IsEndpointReadyAsync(port))
+        if (mustStartDedicatedBrowser)
+        {
+            Console.WriteLine($"Запускаю отдельное окно браузера (CDP): {endpoint}");
+            process = StartBrowserProcess(executablePath, runtimeUserDataDir, scenario, selectedPort, openNewWindow: true);
+            await CdpProbe.WaitUntilReadyAsync(selectedPort, 15000);
+        }
+        else if (!await CdpProbe.IsEndpointReadyAsync(selectedPort))
         {
             Console.WriteLine($"CDP endpoint {endpoint} не найден. Запускаю Яндекс.Браузер вручную...");
-            process = StartBrowserProcess(executablePath, userDataDir, scenario);
-            await CdpProbe.WaitUntilReadyAsync(port, 15000);
+            process = StartBrowserProcess(executablePath, runtimeUserDataDir, scenario, selectedPort, openNewWindow: false);
+            await CdpProbe.WaitUntilReadyAsync(selectedPort, 15000);
         }
         else
         {
@@ -186,6 +201,11 @@ internal static class BrowserLauncher
                 {
                     TryKill(process);
                 }
+
+                if (scenario.Browser.CloneProfileForCdp)
+                {
+                    ProfileCloneStore.TryDeleteDirectory(runtimeUserDataDir);
+                }
             });
         }
         catch
@@ -195,22 +215,32 @@ internal static class BrowserLauncher
                 TryKill(process);
             }
 
+            if (scenario.Browser.CloneProfileForCdp)
+            {
+                ProfileCloneStore.TryDeleteDirectory(runtimeUserDataDir);
+            }
+
             throw;
         }
     }
 
-    private static Process StartBrowserProcess(string executablePath, string userDataDir, ScenarioDefinition scenario)
+    private static Process StartBrowserProcess(string executablePath, string userDataDir, ScenarioDefinition scenario, int cdpPort, bool openNewWindow)
     {
         var startInfo = new ProcessStartInfo(executablePath)
         {
             UseShellExecute = false,
         };
 
-        startInfo.ArgumentList.Add($"--remote-debugging-port={scenario.Browser.CdpPort}");
+        startInfo.ArgumentList.Add($"--remote-debugging-port={cdpPort}");
         startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
         startInfo.ArgumentList.Add($"--profile-directory={scenario.Browser.ProfileDirectoryName}");
         startInfo.ArgumentList.Add("--no-first-run");
         startInfo.ArgumentList.Add("--no-default-browser-check");
+
+        if (openNewWindow)
+        {
+            startInfo.ArgumentList.Add("--new-window");
+        }
 
         foreach (var arg in scenario.Browser.AdditionalArgs)
         {
@@ -230,6 +260,31 @@ internal static class BrowserLauncher
 
         Console.WriteLine($"Браузер запущен вручную. PID: {process.Id}");
         return process;
+    }
+
+    private static async Task<int> PickPortAsync(int preferredPort, bool dedicatedWindow)
+    {
+        if (!dedicatedWindow)
+        {
+            return preferredPort;
+        }
+
+        if (!await CdpProbe.IsEndpointReadyAsync(preferredPort))
+        {
+            return preferredPort;
+        }
+
+        for (var offset = 1; offset <= 20; offset++)
+        {
+            var candidatePort = preferredPort + offset;
+            if (!await CdpProbe.IsEndpointReadyAsync(candidatePort))
+            {
+                Console.WriteLine($"Порт {preferredPort} уже занят. Выбран свободный порт: {candidatePort}");
+                return candidatePort;
+            }
+        }
+
+        throw new InvalidOperationException("Не удалось подобрать свободный CDP порт для отдельного окна браузера.");
     }
 
     private static List<string> BuildCommonArgs(string profileDirectoryName, List<string> additionalArgs)
@@ -523,6 +578,8 @@ internal sealed class BrowserDefinition
     public BrowserLaunchMode LaunchMode { get; init; } = BrowserLaunchMode.Cdp;
     public int CdpPort { get; init; } = 9222;
     public bool KeepBrowserOpen { get; init; }
+    public bool ForceNewWindow { get; init; } = true;
+    public bool CloneProfileForCdp { get; init; } = true;
     public bool UseProfileClone { get; init; } = true;
     public List<string> AdditionalArgs { get; init; } = [];
 }

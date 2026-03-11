@@ -10,6 +10,8 @@
     "launchMode": "cdp",
     "cdpPort": 9222,
     "keepBrowserOpen": false,
+    "forceNewWindow": true,
+    "cloneProfileForCdp": true,
     "useProfileClone": true,
     "additionalArgs": []
   },
