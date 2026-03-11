@@ -1,0 +1,18 @@
+{
+  "name": "TikTok: open and scroll videos",
+  "startUrl": "https://www.tiktok.com/foryou",
+  "loginWaitSeconds": 30,
+  "slowMoMs": 80,
+  "steps": [
+    {
+      "action": "wait",
+      "durationMs": 2000
+    },
+    {
+      "action": "keyPress",
+      "key": "ArrowDown",
+      "afterDelayMs": 2500,
+      "repeat": 20
+    }
+  ]
+}
