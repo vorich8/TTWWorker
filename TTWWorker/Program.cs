@@ -47,23 +47,10 @@ if (!BrowserPathResolver.TryResolveExecutablePath(scenario.Browser.ExecutablePat
     return;
 }
 
-if (!BrowserPathResolver.TryResolveUserDataDir(scenario.Browser.UserDataDir, out var userDataDir, out var checkedUserDataDirs))
-{
-    Console.WriteLine("Не удалось найти папку данных профиля браузера (userDataDir).");
-    Console.WriteLine("Проверенные пути:");
-    foreach (var path in checkedUserDataDirs)
-    {
-        Console.WriteLine($" - {path}");
-    }
-
-    return;
-}
-
 Console.WriteLine($"Сценарий загружен: {scenario.Name}");
 Console.WriteLine($"Шагов в сценарии: {scenario.Steps.Count}");
 Console.WriteLine($"Браузер: {executablePath}");
-Console.WriteLine($"Папка профилей: {userDataDir}");
-Console.WriteLine($"Профиль: {scenario.Browser.ProfileDirectoryName}");
+Console.WriteLine("Профиль: новый временный (без использования профиля Яндекса)");
 Console.WriteLine($"Режим запуска: {scenario.Browser.LaunchMode}");
 
 using var playwright = await Playwright.CreateAsync();
@@ -71,7 +58,7 @@ BrowserSession? session = null;
 
 try
 {
-    session = await BrowserLauncher.LaunchAsync(playwright, scenario, executablePath, userDataDir);
+    session = await BrowserLauncher.LaunchAsync(playwright, scenario, executablePath);
 
     Console.WriteLine($"Переход на: {scenario.StartUrl}");
     await session.Page.GotoAsync(scenario.StartUrl);
@@ -104,45 +91,34 @@ finally
 
 internal static class BrowserLauncher
 {
-    public static async Task<BrowserSession> LaunchAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    public static async Task<BrowserSession> LaunchAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
     {
         return scenario.Browser.LaunchMode switch
         {
-            BrowserLaunchMode.Cdp => await LaunchCdpAsync(playwright, scenario, executablePath, userDataDir),
-            BrowserLaunchMode.Persistent => await LaunchPersistentWithFallbackAsync(playwright, scenario, executablePath, userDataDir),
+            BrowserLaunchMode.Cdp => await LaunchCdpAsync(playwright, scenario, executablePath),
+            BrowserLaunchMode.Persistent => await LaunchPersistentWithFallbackAsync(playwright, scenario, executablePath),
             _ => throw new InvalidOperationException($"Неизвестный launchMode: {scenario.Browser.LaunchMode}"),
         };
     }
 
-    private static async Task<BrowserSession> LaunchPersistentWithFallbackAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    private static async Task<BrowserSession> LaunchPersistentWithFallbackAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
     {
-        try
-        {
-            Console.WriteLine("Запуск Playwright persistent...");
-            var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, userDataDir);
-            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-            return new BrowserSession(page, async () => await context.CloseAsync());
-        }
-        catch (PlaywrightException ex) when (scenario.Browser.UseProfileClone)
-        {
-            Console.WriteLine("Persistent не удался. Пробую копию профиля...");
-            Console.WriteLine($"Причина: {ex.Message}");
+        var runtimeUserDataDir = RuntimeProfileStore.CreateEmptyUserDataDir();
+        Console.WriteLine($"Создан новый временный профиль: {runtimeUserDataDir}");
 
-            var cloneDir = ProfileCloneStore.CreateProfileClone(userDataDir, scenario.Browser.ProfileDirectoryName);
-            var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, cloneDir);
-            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+        var context = await LaunchPersistentContextAsync(playwright, scenario, executablePath, runtimeUserDataDir);
+        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
 
-            return new BrowserSession(page, async () =>
-            {
-                await context.CloseAsync();
-                ProfileCloneStore.TryDeleteDirectory(cloneDir);
-            });
-        }
+        return new BrowserSession(page, async () =>
+        {
+            await context.CloseAsync();
+            RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
+        });
     }
 
     private static async Task<IBrowserContext> LaunchPersistentContextAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
     {
-        var args = BuildCommonArgs(scenario.Browser.ProfileDirectoryName, scenario.Browser.AdditionalArgs);
+        var args = BuildCommonArgs(scenario.Browser.AdditionalArgs);
 
         return await playwright.Chromium.LaunchPersistentContextAsync(userDataDir, new BrowserTypeLaunchPersistentContextOptions
         {
@@ -154,17 +130,11 @@ internal static class BrowserLauncher
         });
     }
 
-    private static async Task<BrowserSession> LaunchCdpAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath, string userDataDir)
+    private static async Task<BrowserSession> LaunchCdpAsync(IPlaywright playwright, ScenarioDefinition scenario, string executablePath)
     {
         var mustStartDedicatedBrowser = scenario.Browser.ForceNewWindow;
-        var sourceUserDataDir = userDataDir;
-        var runtimeUserDataDir = userDataDir;
-
-        if (scenario.Browser.CloneProfileForCdp)
-        {
-            runtimeUserDataDir = ProfileCloneStore.CreateProfileClone(sourceUserDataDir, scenario.Browser.ProfileDirectoryName);
-            Console.WriteLine($"Для CDP создана отдельная копия профиля: {runtimeUserDataDir}");
-        }
+        var runtimeUserDataDir = RuntimeProfileStore.CreateEmptyUserDataDir();
+        Console.WriteLine($"Для CDP создан новый временный профиль: {runtimeUserDataDir}");
 
         var selectedPort = await PickPortAsync(scenario.Browser.CdpPort, mustStartDedicatedBrowser);
         var endpoint = $"http://127.0.0.1:{selectedPort}";
@@ -202,10 +172,7 @@ internal static class BrowserLauncher
                     TryKill(process);
                 }
 
-                if (scenario.Browser.CloneProfileForCdp)
-                {
-                    ProfileCloneStore.TryDeleteDirectory(runtimeUserDataDir);
-                }
+                RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
             });
         }
         catch
@@ -215,10 +182,7 @@ internal static class BrowserLauncher
                 TryKill(process);
             }
 
-            if (scenario.Browser.CloneProfileForCdp)
-            {
-                ProfileCloneStore.TryDeleteDirectory(runtimeUserDataDir);
-            }
+            RuntimeProfileStore.TryDeleteDirectory(runtimeUserDataDir);
 
             throw;
         }
@@ -233,7 +197,6 @@ internal static class BrowserLauncher
 
         startInfo.ArgumentList.Add($"--remote-debugging-port={cdpPort}");
         startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
-        startInfo.ArgumentList.Add($"--profile-directory={scenario.Browser.ProfileDirectoryName}");
         startInfo.ArgumentList.Add("--no-first-run");
         startInfo.ArgumentList.Add("--no-default-browser-check");
 
@@ -287,13 +250,12 @@ internal static class BrowserLauncher
         throw new InvalidOperationException("Не удалось подобрать свободный CDP порт для отдельного окна браузера.");
     }
 
-    private static List<string> BuildCommonArgs(string profileDirectoryName, List<string> additionalArgs)
+    private static List<string> BuildCommonArgs(List<string> additionalArgs)
     {
         var args = new List<string>
         {
             "--no-first-run",
             "--no-default-browser-check",
-            $"--profile-directory={profileDirectoryName}",
         };
 
         args.AddRange(additionalArgs.Where(x => !string.IsNullOrWhiteSpace(x)));
@@ -359,28 +321,12 @@ internal sealed class BrowserSession(IPage page, Func<Task> dispose)
     public Task DisposeAsync() => _dispose();
 }
 
-internal static class ProfileCloneStore
+internal static class RuntimeProfileStore
 {
-    public static string CreateProfileClone(string sourceUserDataDir, string profileDirectoryName)
+    public static string CreateEmptyUserDataDir()
     {
-        var tempRoot = Path.Combine(Path.GetTempPath(), "TTWWorker", $"profile-clone-{DateTime.UtcNow:yyyyMMdd-HHmmss}");
+        var tempRoot = Path.Combine(Path.GetTempPath(), "TTWWorker", $"runtime-profile-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
         Directory.CreateDirectory(tempRoot);
-
-        var sourceProfileDir = Path.Combine(sourceUserDataDir, profileDirectoryName);
-        if (!Directory.Exists(sourceProfileDir))
-        {
-            throw new DirectoryNotFoundException($"Папка профиля не найдена: {sourceProfileDir}");
-        }
-
-        var targetProfileDir = Path.Combine(tempRoot, profileDirectoryName);
-        CopyDirectory(sourceProfileDir, targetProfileDir);
-
-        var localStatePath = Path.Combine(sourceUserDataDir, "Local State");
-        if (File.Exists(localStatePath))
-        {
-            File.Copy(localStatePath, Path.Combine(tempRoot, "Local State"), overwrite: true);
-        }
-
         return tempRoot;
     }
 
@@ -396,25 +342,6 @@ internal static class ProfileCloneStore
         catch
         {
             Console.WriteLine($"Не удалось удалить временную папку профиля: {path}");
-        }
-    }
-
-    private static void CopyDirectory(string sourceDir, string destinationDir)
-    {
-        Directory.CreateDirectory(destinationDir);
-
-        foreach (var file in Directory.GetFiles(sourceDir))
-        {
-            var fileName = Path.GetFileName(file);
-            var destinationFile = Path.Combine(destinationDir, fileName);
-            File.Copy(file, destinationFile, overwrite: true);
-        }
-
-        foreach (var directory in Directory.GetDirectories(sourceDir))
-        {
-            var directoryName = Path.GetFileName(directory);
-            var destinationSubDir = Path.Combine(destinationDir, directoryName);
-            CopyDirectory(directory, destinationSubDir);
         }
     }
 }
@@ -452,31 +379,6 @@ internal static class BrowserPathResolver
         }
 
         executablePath = string.Empty;
-        return false;
-    }
-
-    public static bool TryResolveUserDataDir(string? configuredPath, out string userDataDir, out List<string> checkedPaths)
-    {
-        checkedPaths = [];
-
-        var candidates = new List<string>();
-        AddIfNotEmpty(candidates, configuredPath);
-
-        var localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
-        AddIfNotEmpty(candidates, Path.Combine(localAppData, "Yandex", "YandexBrowser", "User Data"));
-
-        foreach (var rawCandidate in candidates)
-        {
-            var candidate = ExpandPath(rawCandidate);
-            checkedPaths.Add(candidate);
-            if (Directory.Exists(candidate))
-            {
-                userDataDir = candidate;
-                return true;
-            }
-        }
-
-        userDataDir = string.Empty;
         return false;
     }
 
@@ -573,14 +475,10 @@ internal sealed class ScenarioDefinition
 internal sealed class BrowserDefinition
 {
     public string ExecutablePath { get; init; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
-    public string UserDataDir { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data";
-    public string ProfileDirectoryName { get; init; } = "Default";
     public BrowserLaunchMode LaunchMode { get; init; } = BrowserLaunchMode.Cdp;
     public int CdpPort { get; init; } = 9222;
     public bool KeepBrowserOpen { get; init; }
     public bool ForceNewWindow { get; init; } = true;
-    public bool CloneProfileForCdp { get; init; } = true;
-    public bool UseProfileClone { get; init; } = true;
     public List<string> AdditionalArgs { get; init; } = [];
 }
 
