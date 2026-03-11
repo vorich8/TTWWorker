@@ -572,7 +572,7 @@ internal sealed class ScenarioDefinition
 
 internal sealed class BrowserDefinition
 {
-    public string ExecutablePath { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe";
+    public string ExecutablePath { get; init; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public string UserDataDir { get; init; } = "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data";
     public string ProfileDirectoryName { get; init; } = "Default";
     public BrowserLaunchMode LaunchMode { get; init; } = BrowserLaunchMode.Cdp;

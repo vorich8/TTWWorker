@@ -8,6 +8,8 @@ JSON-раннер автоматизации TikTok через Яндекс.Бр
 
 Теперь по умолчанию используется режим **CDP**: раннер запускает/подключается к браузеру через `--remote-debugging-port` и `ConnectOverCDPAsync`.
 
+По вашему запросу дефолтный путь браузера выставлен на `C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe`.
+
 Дополнительно для поведения "как в AutoKBWW" добавлен отдельный изолированный запуск:
 - старт в **новом окне** (`forceNewWindow: true`),
 - запуск через **копию профиля** (`cloneProfileForCdp: true`),
@@ -31,7 +33,7 @@ dotnet run --project TTWWorker -- scenario.json
   "loginWaitSeconds": 5,
   "slowMoMs": 60,
   "browser": {
-    "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
+    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default",
     "launchMode": "cdp",

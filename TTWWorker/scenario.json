@@ -4,7 +4,7 @@
   "loginWaitSeconds": 5,
   "slowMoMs": 60,
   "browser": {
-    "executablePath": "%LOCALAPPDATA%/Yandex/YandexBrowser/Application/browser.exe",
+    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "userDataDir": "%LOCALAPPDATA%/Yandex/YandexBrowser/User Data",
     "profileDirectoryName": "Default",
     "launchMode": "cdp",
