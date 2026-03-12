@@ -419,25 +419,53 @@ internal static class ManualBrowserConnector
     public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
     {
         Directory.CreateDirectory(userDataDir);
-        var port = await PickFreePortAsync(9222);
 
-        var startInfo = new ProcessStartInfo(executablePath)
+        Exception? lastError = null;
+        for (var attempt = 1; attempt <= 2; attempt++)
         {
-            UseShellExecute = true,
-        };
+            var port = await PickFreePortAsync(9222 + (attempt - 1) * 20);
+            Process? process = null;
 
-        startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
-        startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
-        startInfo.ArgumentList.Add("--new-window");
-        startInfo.ArgumentList.Add(startUrl);
+            try
+            {
+                var startInfo = new ProcessStartInfo(executablePath)
+                {
+                    UseShellExecute = true,
+                };
 
-        var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить браузер вручную.");
-        await WaitForCdpAsync(port, 15000);
+                startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
+                startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
+                startInfo.ArgumentList.Add("--new-window");
+                startInfo.ArgumentList.Add(startUrl);
 
-        var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{port}");
-        var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
-        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-        return new ManualBrowserSession(browser, page, process);
+                process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить браузер вручную.");
+
+                var timeoutMs = attempt == 1 ? 30000 : 60000;
+                await WaitForCdpAsync(port, timeoutMs, process);
+
+                var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{port}");
+                var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
+                var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+                return new ManualBrowserSession(browser, page, process);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+                Console.WriteLine($"Не удалось поднять CDP (попытка {attempt}/2): {ex.Message}");
+                Console.WriteLine("Если включен VPN/расширения — запуск может быть медленнее, выполняю повторную попытку...");
+
+                try
+                {
+                    if (process is not null && !process.HasExited)
+                    {
+                        process.Kill(entireProcessTree: true);
+                    }
+                }
+                catch { }
+            }
+        }
+
+        throw new InvalidOperationException($"CDP endpoint не поднялся даже после повторной попытки. {lastError?.Message}");
     }
 
     private static async Task<int> PickFreePortAsync(int preferred)
@@ -461,15 +489,22 @@ internal static class ManualBrowserConnector
         catch { return false; }
     }
 
-    private static async Task WaitForCdpAsync(int port, int timeoutMs)
+    private static async Task WaitForCdpAsync(int port, int timeoutMs, Process process)
     {
         var start = DateTime.UtcNow;
         while ((DateTime.UtcNow - start).TotalMilliseconds < timeoutMs)
         {
             if (await IsPortBusy(port)) return;
-            await Task.Delay(250);
+
+            if (process.HasExited)
+            {
+                throw new InvalidOperationException($"Браузер завершился до поднятия CDP. Код выхода: {process.ExitCode}");
+            }
+
+            await Task.Delay(300);
         }
-        throw new InvalidOperationException("CDP endpoint не поднялся вовремя.");
+
+        throw new InvalidOperationException($"CDP endpoint не поднялся за {timeoutMs / 1000} сек.");
     }
 }
 
