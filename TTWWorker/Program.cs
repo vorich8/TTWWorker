@@ -446,7 +446,7 @@ internal sealed class LikeScheduleState
 internal sealed class AppConfig
 {
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
-    public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
+    public string BrowserExecutablePath { get; set; } = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
     public AutomationConfig DefaultAutomation { get; set; } = new();
 
     public static AppConfig CreateDefault() => new();

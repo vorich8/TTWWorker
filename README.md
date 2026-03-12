@@ -1,6 +1,6 @@
 # TTWWorker
 
-Консольная автоматизация TikTok с независимыми профилями и постоянными настройками за каждым профилем.
+Консольная автоматизация TikTok через Chrome с независимыми профилями и постоянными настройками за каждым профилем.
 
 ## Новый порядок работы
 
@@ -41,7 +41,7 @@ dotnet run --project TTWWorker -- scenario.json
 ```json
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+  "browserExecutablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "defaultAutomation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,

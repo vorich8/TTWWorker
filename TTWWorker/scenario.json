@@ -1,6 +1,6 @@
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+  "browserExecutablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe",
   "defaultAutomation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
