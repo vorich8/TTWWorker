@@ -212,8 +212,7 @@ internal sealed class ControlPanel(string configPath)
             playwright,
             config.BrowserExecutablePath,
             selectedProfile.UserDataDir,
-            config.StartUrl,
-            config.ForceCloseRunningBrowserBeforeLaunch);
+            config.StartUrl);
 
         var page = session.Page;
         Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name} (ручной режим запуска браузера).");
@@ -222,6 +221,10 @@ internal sealed class ControlPanel(string configPath)
         ConfigureAutomationValues(profileSettings.Automation, config.StartUrl, allowStartUrlEdit: false, out _);
         ProfileSettingsStore.Save(selectedProfile, profileSettings, _jsonOptions);
         Console.WriteLine("Настройки профиля сохранены навсегда и будут использоваться в следующих запусках.");
+
+        Console.WriteLine("Откройте/проверьте VPN-вкладку вручную в этом окне браузера.");
+        Console.WriteLine("Когда VPN готов, нажмите Enter для старта автоматизации...");
+        Console.ReadLine();
 
         Console.WriteLine("Автоматизация запущена. Команды: like | stop");
 
@@ -417,23 +420,13 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
 
 internal static class ManualBrowserConnector
 {
-    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, bool forceCloseRunningBrowserBeforeLaunch)
+    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
     {
         Directory.CreateDirectory(userDataDir);
 
         Exception? lastError = null;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            if (forceCloseRunningBrowserBeforeLaunch)
-            {
-                var killed = CloseRunningBrowserProcesses(executablePath);
-                if (killed > 0)
-                {
-                    Console.WriteLine($"Закрыто процессов браузера перед запуском: {killed}");
-                    await Task.Delay(1200);
-                }
-            }
-
             var requestedPort = await PickFreePortAsync(9222 + (attempt - 1) * 20);
             Process? process = null;
 
@@ -482,27 +475,6 @@ internal static class ManualBrowserConnector
         throw new InvalidOperationException(
             "CDP endpoint не поднялся даже после повторной попытки. " +
             $"Проверьте, не открыт ли этот же профиль в другом окне, и что путь браузера корректный. Детали: {lastError?.Message}");
-    }
-
-    private static int CloseRunningBrowserProcesses(string executablePath)
-    {
-        var killed = 0;
-        var targetName = Path.GetFileNameWithoutExtension(executablePath);
-        foreach (var process in Process.GetProcessesByName(targetName))
-        {
-            try
-            {
-                if (process.HasExited) continue;
-                process.Kill(entireProcessTree: true);
-                killed++;
-            }
-            catch
-            {
-                // ignore
-            }
-        }
-
-        return killed;
     }
 
     private static async Task<int> PickFreePortAsync(int preferred)
@@ -616,7 +588,6 @@ internal sealed class AppConfig
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public AutomationConfig DefaultAutomation { get; set; } = new();
-    public bool ForceCloseRunningBrowserBeforeLaunch { get; set; } = true;
 
     public static AppConfig CreateDefault() => new();
 }
