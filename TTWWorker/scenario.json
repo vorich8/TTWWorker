@@ -1,7 +1,7 @@
 {
   "startUrl": "https://www.tiktok.com/foryou",
   "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
-  "launchMode": "AutoStartAndAttach",
+  "launchMode": "PlaywrightPersistent",
   "cdpPort": 9222,
   "defaultAutomation": {
     "workDurationMinutes": 60,

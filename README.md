@@ -6,10 +6,11 @@
 
 Добавлен режим запуска:
 
+- `PlaywrightPersistent` — более автоматизированный режим (по умолчанию): старт через `LaunchPersistentContextAsync` без ручного CDP-подключения.
 - `AutoStartAndAttach` — раннер сам стартует браузер и подключается к CDP.
 - `AttachToExisting` — раннер **не стартует и не закрывает** браузер, а подключается к уже поднятому CDP.
 
-Если основной браузер должен оставаться открытым (например, из-за VPN), используйте `AttachToExisting`.
+Если CDP-режим конфликтует с открытым основным браузером, используйте `PlaywrightPersistent` (по умолчанию) или `AttachToExisting`.
 
 ## Новый порядок работы
 
@@ -50,12 +51,12 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Пример `scenario.json`
 
-- `launchMode` читается как строковый enum (`AutoStartAndAttach` или `AttachToExisting`).
+- `launchMode` читается как строковый enum (`PlaywrightPersistent`, `AutoStartAndAttach` или `AttachToExisting`).
 ```json
 {
   "startUrl": "https://www.tiktok.com/foryou",
   "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
-  "launchMode": "AutoStartAndAttach",
+  "launchMode": "PlaywrightPersistent",
   "cdpPort": 9222,
   "defaultAutomation": {
     "workDurationMinutes": 60,

@@ -84,7 +84,7 @@ internal sealed class ControlPanel(string configPath)
             config.StartUrl = updatedUrl;
         }
 
-        Console.Write($"Режим запуска (AutoStartAndAttach / AttachToExisting), сейчас: {config.LaunchMode}: ");
+        Console.Write($"Режим запуска (PlaywrightPersistent / AutoStartAndAttach / AttachToExisting), сейчас: {config.LaunchMode}: ");
         var launchMode = Console.ReadLine()?.Trim();
         if (Enum.TryParse<BrowserLaunchMode>(launchMode, ignoreCase: true, out var parsedMode))
         {
@@ -237,6 +237,11 @@ internal sealed class ControlPanel(string configPath)
         using var playwright = await Playwright.CreateAsync();
         await using var session = config.LaunchMode switch
         {
+            BrowserLaunchMode.PlaywrightPersistent => await ManualBrowserConnector.StartPersistentAsync(
+                playwright,
+                config.BrowserExecutablePath,
+                selectedProfile.UserDataDir,
+                config.StartUrl),
             BrowserLaunchMode.AttachToExisting => await ManualBrowserConnector.AttachToExistingAsync(
                 playwright,
                 config.BrowserExecutablePath,
@@ -447,13 +452,24 @@ internal sealed class ProfileSettings
     public AutomationConfig Automation { get; set; } = new();
 }
 
-internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process process) : IAsyncDisposable
+internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process process, IBrowserContext? ownedContext = null) : IAsyncDisposable
 {
     public IPage Page { get; } = page;
 
     public async ValueTask DisposeAsync()
     {
-        try { await browser.CloseAsync(); } catch { }
+        try
+        {
+            if (ownedContext is not null)
+            {
+                await ownedContext.CloseAsync();
+            }
+            else
+            {
+                await browser.CloseAsync();
+            }
+        }
+        catch { }
         try
         {
             if (process.Id != Process.GetCurrentProcess().Id && !process.HasExited)
@@ -467,6 +483,24 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
 
 internal static class ManualBrowserConnector
 {
+    public static async Task<ManualBrowserSession> StartPersistentAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
+    {
+        var context = await playwright.Chromium.LaunchPersistentContextAsync(
+            userDataDir,
+            new BrowserTypeLaunchPersistentContextOptions
+            {
+                ExecutablePath = executablePath,
+                Headless = false,
+                Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
+            });
+
+        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+        await page.GotoAsync(startUrl);
+
+        var browser = context.Browser ?? throw new InvalidOperationException("Не удалось получить Browser из persistent context.");
+        return new ManualBrowserSession(browser, page, Process.GetCurrentProcess(), context);
+    }
+
     public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, int preferredPort)
     {
         Directory.CreateDirectory(userDataDir);
@@ -669,7 +703,7 @@ internal sealed class AppConfig
 {
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
-    public BrowserLaunchMode LaunchMode { get; set; } = BrowserLaunchMode.AutoStartAndAttach;
+    public BrowserLaunchMode LaunchMode { get; set; } = BrowserLaunchMode.PlaywrightPersistent;
     public int CdpPort { get; set; } = 9222;
     public AutomationConfig DefaultAutomation { get; set; } = new();
 
@@ -678,6 +712,7 @@ internal sealed class AppConfig
 
 internal enum BrowserLaunchMode
 {
+    PlaywrightPersistent,
     AutoStartAndAttach,
     AttachToExisting
 }
