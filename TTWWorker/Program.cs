@@ -23,8 +23,8 @@ internal sealed class ControlPanel(string configPath)
         {
             Console.WriteLine();
             Console.WriteLine("=== ПУНКТ УПРАВЛЕНИЯ TTWWorker ===");
-            Console.WriteLine("1) Запустить автоматизацию");
-            Console.WriteLine("2) Настроить автоматизацию");
+            Console.WriteLine("1) Запустить профиль");
+            Console.WriteLine("2) Настроить глобальные значения по умолчанию");
             Console.WriteLine("3) Показать текущий JSON");
             Console.WriteLine("4) Управление профилями");
             Console.WriteLine("0) Выход");
@@ -34,10 +34,10 @@ internal sealed class ControlPanel(string configPath)
             switch (input)
             {
                 case "1":
-                    await RunAutomationAsync();
+                    await RunProfileAsync();
                     break;
                 case "2":
-                    await ConfigureAutomationAsync();
+                    await ConfigureGlobalDefaultsAsync();
                     break;
                 case "3":
                     ShowCurrentJson();
@@ -60,57 +60,65 @@ internal sealed class ControlPanel(string configPath)
         File.WriteAllText(_configPath, JsonSerializer.Serialize(AppConfig.CreateDefault(), _jsonOptions));
     }
 
-    private async Task ConfigureAutomationAsync()
+    private async Task ConfigureGlobalDefaultsAsync()
     {
         var config = LoadConfig();
-        ConfigureAutomationValues(config);
+        ConfigureAutomationValues(config.DefaultAutomation, config.StartUrl, allowStartUrlEdit: true, out var updatedUrl);
+        if (!string.IsNullOrWhiteSpace(updatedUrl))
+        {
+            config.StartUrl = updatedUrl;
+        }
+
         await SaveConfigAsync(config);
-        Console.WriteLine("Настройки автоматизации сохранены.");
+        Console.WriteLine("Глобальные значения по умолчанию сохранены в scenario.json");
     }
 
-    private void ConfigureAutomationValues(AppConfig config)
+    private void ConfigureAutomationValues(AutomationConfig automation, string currentUrl, bool allowStartUrlEdit, out string? updatedStartUrl)
     {
-        var a = config.Automation;
+        updatedStartUrl = null;
 
-        Console.Write($"URL (сейчас: {config.StartUrl}): ");
-        var url = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(url)) config.StartUrl = url;
-
-        Console.Write($"Время работы в минутах (сейчас: {a.WorkDurationMinutes}): ");
-        if (int.TryParse(Console.ReadLine(), out var workMin) && workMin > 0) a.WorkDurationMinutes = workMin;
-
-        Console.Write($"Мин. задержка листания в сек (сейчас: {a.ScrollDelayMinSeconds}): ");
-        if (int.TryParse(Console.ReadLine(), out var scrollMin) && scrollMin > 0) a.ScrollDelayMinSeconds = scrollMin;
-
-        Console.Write($"Макс. задержка листания в сек (сейчас: {a.ScrollDelayMaxSeconds}): ");
-        if (int.TryParse(Console.ReadLine(), out var scrollMax) && scrollMax >= a.ScrollDelayMinSeconds) a.ScrollDelayMaxSeconds = scrollMax;
-
-        Console.Write($"Действие листания keyPress/click (сейчас: {a.ScrollActionType}): ");
-        var actionType = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (actionType is "keypress" or "click") a.ScrollActionType = actionType;
-
-        if (a.ScrollActionType == "keypress")
+        if (allowStartUrlEdit)
         {
-            Console.Write($"Клавиша листания (сейчас: {a.ScrollKey}): ");
+            Console.Write($"URL (сейчас: {currentUrl}): ");
+            var url = Console.ReadLine()?.Trim();
+            if (!string.IsNullOrWhiteSpace(url)) updatedStartUrl = url;
+        }
+
+        Console.Write($"Время работы в минутах (сейчас: {automation.WorkDurationMinutes}): ");
+        if (int.TryParse(Console.ReadLine(), out var workMin) && workMin > 0) automation.WorkDurationMinutes = workMin;
+
+        Console.Write($"Мин. задержка листания в сек (сейчас: {automation.ScrollDelayMinSeconds}): ");
+        if (int.TryParse(Console.ReadLine(), out var minDelay) && minDelay > 0) automation.ScrollDelayMinSeconds = minDelay;
+
+        Console.Write($"Макс. задержка листания в сек (сейчас: {automation.ScrollDelayMaxSeconds}): ");
+        if (int.TryParse(Console.ReadLine(), out var maxDelay) && maxDelay >= automation.ScrollDelayMinSeconds) automation.ScrollDelayMaxSeconds = maxDelay;
+
+        Console.Write($"Действие листания keyPress/click (сейчас: {automation.ScrollActionType}): ");
+        var actionType = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (actionType is "keypress" or "click") automation.ScrollActionType = actionType;
+
+        if (automation.ScrollActionType == "keypress")
+        {
+            Console.Write($"Клавиша листания (сейчас: {automation.ScrollKey}): ");
             var key = Console.ReadLine()?.Trim();
-            if (!string.IsNullOrWhiteSpace(key)) a.ScrollKey = key;
+            if (!string.IsNullOrWhiteSpace(key)) automation.ScrollKey = key;
         }
         else
         {
-            Console.Write($"Селектор кнопки листания (сейчас: {a.ScrollSelector}): ");
+            Console.Write($"Селектор кнопки листания (сейчас: {automation.ScrollSelector}): ");
             var selector = Console.ReadLine()?.Trim();
-            if (!string.IsNullOrWhiteSpace(selector)) a.ScrollSelector = selector;
+            if (!string.IsNullOrWhiteSpace(selector)) automation.ScrollSelector = selector;
         }
 
-        Console.Write($"Лайков за период (сейчас: {a.LikesPerPeriod}): ");
-        if (int.TryParse(Console.ReadLine(), out var likesCount) && likesCount >= 0) a.LikesPerPeriod = likesCount;
+        Console.Write($"Лайков за период (сейчас: {automation.LikesPerPeriod}): ");
+        if (int.TryParse(Console.ReadLine(), out var likesPerPeriod) && likesPerPeriod >= 0) automation.LikesPerPeriod = likesPerPeriod;
 
-        Console.Write($"Длина периода лайков в минутах (сейчас: {a.LikePeriodMinutes}): ");
-        if (int.TryParse(Console.ReadLine(), out var likePeriodMin) && likePeriodMin > 0) a.LikePeriodMinutes = likePeriodMin;
+        Console.Write($"Длина периода лайков в минутах (сейчас: {automation.LikePeriodMinutes}): ");
+        if (int.TryParse(Console.ReadLine(), out var likePeriod) && likePeriod > 0) automation.LikePeriodMinutes = likePeriod;
 
-        Console.Write($"Клавиша лайка (сейчас: {a.LikeKey}): ");
+        Console.Write($"Клавиша лайка (сейчас: {automation.LikeKey}): ");
         var likeKey = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(likeKey)) a.LikeKey = likeKey;
+        if (!string.IsNullOrWhiteSpace(likeKey)) automation.LikeKey = likeKey;
     }
 
     private void ManageProfiles()
@@ -120,14 +128,8 @@ internal sealed class ControlPanel(string configPath)
             Console.WriteLine();
             Console.WriteLine("=== УПРАВЛЕНИЕ ПРОФИЛЯМИ ===");
             var profiles = _profileStore.GetProfiles();
-            if (profiles.Count == 0)
-            {
-                Console.WriteLine("Профилей нет. Создайте новый (команда n).");
-            }
-            else
-            {
-                foreach (var p in profiles) Console.WriteLine($"- {p.Name}");
-            }
+            if (profiles.Count == 0) Console.WriteLine("Профилей нет. Создайте новый (команда n).");
+            else foreach (var p in profiles) Console.WriteLine($"- {p.Name}");
 
             Console.WriteLine("n) Создать новый профиль");
             Console.WriteLine("d) Удалить профиль");
@@ -136,24 +138,19 @@ internal sealed class ControlPanel(string configPath)
             var cmd = Console.ReadLine()?.Trim().ToLowerInvariant();
 
             if (cmd == "q") return;
-
             if (cmd == "n")
             {
                 var created = _profileStore.CreateNextProfile();
                 Console.WriteLine($"Создан профиль: {created.Name}");
+                continue;
             }
-            else if (cmd == "d")
+
+            if (cmd == "d")
             {
                 Console.Write("Имя профиля для удаления: ");
                 var name = Console.ReadLine()?.Trim();
-                if (!string.IsNullOrWhiteSpace(name) && _profileStore.DeleteProfile(name))
-                {
-                    Console.WriteLine($"Профиль удалён: {name}");
-                }
-                else
-                {
-                    Console.WriteLine("Не удалось удалить профиль.");
-                }
+                if (!string.IsNullOrWhiteSpace(name) && _profileStore.DeleteProfile(name)) Console.WriteLine($"Профиль удалён: {name}");
+                else Console.WriteLine("Не удалось удалить профиль.");
             }
         }
     }
@@ -178,10 +175,7 @@ internal sealed class ControlPanel(string configPath)
         {
             Console.WriteLine();
             Console.WriteLine("Выберите профиль для запуска:");
-            for (var i = 0; i < profiles.Count; i++)
-            {
-                Console.WriteLine($"{i + 1}) {profiles[i].Name}");
-            }
+            for (var i = 0; i < profiles.Count; i++) Console.WriteLine($"{i + 1}) {profiles[i].Name}");
             Console.WriteLine("n) Создать новый профиль");
             Console.Write("Выбор: ");
             var input = Console.ReadLine()?.Trim().ToLowerInvariant();
@@ -194,101 +188,91 @@ internal sealed class ControlPanel(string configPath)
                 continue;
             }
 
-            if (int.TryParse(input, out var idx) && idx >= 1 && idx <= profiles.Count)
-            {
-                return profiles[idx - 1];
-            }
-
+            if (int.TryParse(input, out var idx) && idx >= 1 && idx <= profiles.Count) return profiles[idx - 1];
             Console.WriteLine("Некорректный выбор.");
         }
     }
 
-    private async Task RunAutomationAsync()
+    private async Task RunProfileAsync()
     {
         var selectedProfile = SelectProfileForRun();
-        Console.WriteLine($"Выбран профиль: {selectedProfile.Name}");
+        var config = LoadConfig();
 
-        var initialConfig = LoadConfig();
-        Console.WriteLine("Теперь настройте параметры автоматизации перед запуском.");
-        ConfigureAutomationValues(initialConfig);
-        await SaveConfigAsync(initialConfig);
-        Console.WriteLine("Настройки сохранены, запускаю автоматизацию...");
-
-        if (!File.Exists(initialConfig.BrowserExecutablePath))
+        if (!File.Exists(config.BrowserExecutablePath))
         {
-            Console.WriteLine($"Браузер не найден: {initialConfig.BrowserExecutablePath}");
+            Console.WriteLine($"Браузер не найден: {config.BrowserExecutablePath}");
             return;
         }
 
-        using var playwright = await Playwright.CreateAsync();
+        var profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
 
+        using var playwright = await Playwright.CreateAsync();
         await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
             selectedProfile.UserDataDir,
             new BrowserTypeLaunchPersistentContextOptions
             {
-                ExecutablePath = initialConfig.BrowserExecutablePath,
+                ExecutablePath = config.BrowserExecutablePath,
                 Headless = false,
                 Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
             });
 
         var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-        await page.GotoAsync(initialConfig.StartUrl);
+        await page.GotoAsync(config.StartUrl);
 
-        Console.WriteLine("Автоматизация запущена.");
-        Console.WriteLine("Команды в любой момент: like | stop");
+        Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name}.");
+        Console.WriteLine("Сейчас введите/подтвердите настройки (Enter = оставить текущее сохранённое значение).");
 
-        var commandQueue = new ConcurrentQueue<string>();
+        ConfigureAutomationValues(profileSettings.Automation, config.StartUrl, allowStartUrlEdit: false, out _);
+        ProfileSettingsStore.Save(selectedProfile, profileSettings, _jsonOptions);
+        Console.WriteLine("Настройки профиля сохранены навсегда и будут использоваться в следующих запусках.");
+
+        Console.WriteLine("Автоматизация запущена. Команды: like | stop");
+
+        var queue = new ConcurrentQueue<string>();
         using var cts = new CancellationTokenSource();
-        var inputTask = Task.Run(() => ReadCommands(commandQueue, cts.Token), cts.Token);
+        _ = Task.Run(() => ReadCommands(queue, cts.Token), cts.Token);
 
         var runStartedAt = DateTime.UtcNow;
-        var likesPlan = LikeScheduler.CreatePlan(DateTime.UtcNow, LoadConfig().Automation);
+        var likesPlan = LikeScheduler.CreatePlan(DateTime.UtcNow, profileSettings.Automation);
 
-        try
+        while (!cts.Token.IsCancellationRequested)
         {
-            while (!cts.Token.IsCancellationRequested)
+            // постоянный рескан глобального json + профиля
+            config = LoadConfig();
+            profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
+            var a = profileSettings.Automation;
+
+            if (DateTime.UtcNow >= runStartedAt.AddMinutes(Math.Max(1, a.WorkDurationMinutes)))
             {
-                var cfg = LoadConfig(); // постоянный рескан json
-                var automation = cfg.Automation;
+                Console.WriteLine("Время работы вышло. Автоматизация завершена.");
+                break;
+            }
 
-                var workDeadline = runStartedAt.AddMinutes(Math.Max(1, automation.WorkDurationMinutes));
-                if (DateTime.UtcNow >= workDeadline)
-                {
-                    Console.WriteLine("Время работы вышло. Автоматизация завершена.");
-                    break;
-                }
+            await ExecuteCommandsAsync(page, a, queue, cts);
+            await ExecuteScheduledLikesAsync(page, a, likesPlan);
 
-                await ExecuteCommandsAsync(page, automation, commandQueue, cts);
-                await ExecuteScheduledLikesAsync(page, automation, likesPlan);
+            var delaySec = Random.Shared.Next(Math.Max(1, a.ScrollDelayMinSeconds), Math.Max(a.ScrollDelayMinSeconds, a.ScrollDelayMaxSeconds) + 1);
+            Console.WriteLine($"Ожидание {delaySec} сек...");
+            await page.WaitForTimeoutAsync(delaySec * 1000);
 
-                var delaySec = Random.Shared.Next(
-                    Math.Max(1, automation.ScrollDelayMinSeconds),
-                    Math.Max(automation.ScrollDelayMinSeconds, automation.ScrollDelayMaxSeconds) + 1);
+            await ExecuteCommandsAsync(page, a, queue, cts);
+            await ExecuteScheduledLikesAsync(page, a, likesPlan);
+            if (cts.Token.IsCancellationRequested) break;
 
-                Console.WriteLine($"Ожидание {delaySec} сек...");
-                await page.WaitForTimeoutAsync(delaySec * 1000);
-
-                await ExecuteCommandsAsync(page, automation, commandQueue, cts);
-                await ExecuteScheduledLikesAsync(page, automation, likesPlan);
-                if (cts.Token.IsCancellationRequested) break;
-
-                if (automation.ScrollActionType == "click" && !string.IsNullOrWhiteSpace(automation.ScrollSelector))
-                {
-                    await page.ClickAsync(automation.ScrollSelector);
-                    Console.WriteLine($"Листание: click по {automation.ScrollSelector}");
-                }
-                else
-                {
-                    var key = string.IsNullOrWhiteSpace(automation.ScrollKey) ? "ArrowDown" : automation.ScrollKey;
-                    await page.Keyboard.PressAsync(key);
-                    Console.WriteLine($"Листание: keyPress {key}");
-                }
+            if (a.ScrollActionType == "click" && !string.IsNullOrWhiteSpace(a.ScrollSelector))
+            {
+                await page.ClickAsync(a.ScrollSelector);
+                Console.WriteLine($"Листание: click по {a.ScrollSelector}");
+            }
+            else
+            {
+                var key = string.IsNullOrWhiteSpace(a.ScrollKey) ? "ArrowDown" : a.ScrollKey;
+                await page.Keyboard.PressAsync(key);
+                Console.WriteLine($"Листание: keyPress {key}");
             }
         }
-        finally
-        {
-            cts.Cancel();
-        }
+
+        cts.Cancel();
     }
 
     private static void ReadCommands(ConcurrentQueue<string> queue, CancellationToken token)
@@ -296,24 +280,14 @@ internal sealed class ControlPanel(string configPath)
         while (!token.IsCancellationRequested)
         {
             var command = Console.ReadLine();
-            if (!string.IsNullOrWhiteSpace(command))
-            {
-                queue.Enqueue(command.Trim().ToLowerInvariant());
-            }
+            if (!string.IsNullOrWhiteSpace(command)) queue.Enqueue(command.Trim().ToLowerInvariant());
         }
     }
 
     private static async Task ExecuteScheduledLikesAsync(IPage page, AutomationConfig cfg, LikeScheduleState state)
     {
-        if (cfg.LikesPerPeriod <= 0)
-        {
-            return;
-        }
-
-        if (DateTime.UtcNow >= state.PeriodEndUtc)
-        {
-            state.Reset(cfg);
-        }
+        if (cfg.LikesPerPeriod <= 0) return;
+        if (DateTime.UtcNow >= state.PeriodEndUtc) state.Reset(cfg);
 
         while (state.TryDequeueDueLike(DateTime.UtcNow, out _))
         {
@@ -373,11 +347,11 @@ internal sealed class BrowserProfileStore(string rootPath)
     public BrowserProfile CreateNextProfile()
     {
         EnsureStoreExists();
-        var nextNumber = 1;
+        var next = 1;
         var existing = GetProfiles().Select(p => p.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        while (existing.Contains($"Profile {nextNumber}")) nextNumber++;
+        while (existing.Contains($"Profile {next}")) next++;
 
-        var name = $"Profile {nextNumber}";
+        var name = $"Profile {next}";
         var dir = Path.Combine(_rootPath, name);
         Directory.CreateDirectory(dir);
         return new BrowserProfile(name, dir);
@@ -387,7 +361,6 @@ internal sealed class BrowserProfileStore(string rootPath)
     {
         var path = Path.Combine(_rootPath, profileName);
         if (!Directory.Exists(path)) return false;
-
         Directory.Delete(path, true);
         return true;
     }
@@ -395,12 +368,42 @@ internal sealed class BrowserProfileStore(string rootPath)
 
 internal sealed record BrowserProfile(string Name, string UserDataDir);
 
+internal static class ProfileSettingsStore
+{
+    private const string FileName = "automation-settings.json";
+
+    public static ProfileSettings LoadOrCreate(BrowserProfile profile, AutomationConfig defaults, JsonSerializerOptions options)
+    {
+        var path = GetPath(profile);
+        if (!File.Exists(path))
+        {
+            var created = new ProfileSettings { Automation = defaults.Clone() };
+            Save(profile, created, options);
+            return created;
+        }
+
+        var json = File.ReadAllText(path);
+        return JsonSerializer.Deserialize<ProfileSettings>(json, options)
+            ?? new ProfileSettings { Automation = defaults.Clone() };
+    }
+
+    public static void Save(BrowserProfile profile, ProfileSettings settings, JsonSerializerOptions options)
+    {
+        var path = GetPath(profile);
+        File.WriteAllText(path, JsonSerializer.Serialize(settings, options));
+    }
+
+    private static string GetPath(BrowserProfile profile) => Path.Combine(profile.UserDataDir, FileName);
+}
+
+internal sealed class ProfileSettings
+{
+    public AutomationConfig Automation { get; set; } = new();
+}
+
 internal static class LikeScheduler
 {
-    public static LikeScheduleState CreatePlan(DateTime nowUtc, AutomationConfig cfg)
-    {
-        return new LikeScheduleState(nowUtc, cfg);
-    }
+    public static LikeScheduleState CreatePlan(DateTime nowUtc, AutomationConfig cfg) => new(nowUtc, cfg);
 }
 
 internal sealed class LikeScheduleState
@@ -413,17 +416,13 @@ internal sealed class LikeScheduleState
         Reset(periodStartUtc, cfg);
     }
 
-    public void Reset(AutomationConfig cfg)
-    {
-        Reset(DateTime.UtcNow, cfg);
-    }
+    public void Reset(AutomationConfig cfg) => Reset(DateTime.UtcNow, cfg);
 
     private void Reset(DateTime periodStartUtc, AutomationConfig cfg)
     {
         _plannedLikesUtc.Clear();
         var periodMin = Math.Max(1, cfg.LikePeriodMinutes);
         PeriodEndUtc = periodStartUtc.AddMinutes(periodMin);
-
         if (cfg.LikesPerPeriod <= 0) return;
 
         var secondsInPeriod = (int)TimeSpan.FromMinutes(periodMin).TotalSeconds;
@@ -432,18 +431,13 @@ internal sealed class LikeScheduleState
             .OrderBy(x => x)
             .ToList();
 
-        foreach (var offset in offsets)
-        {
-            _plannedLikesUtc.Enqueue(periodStartUtc.AddSeconds(offset));
-        }
+        foreach (var offset in offsets) _plannedLikesUtc.Enqueue(periodStartUtc.AddSeconds(offset));
     }
 
     public bool TryDequeueDueLike(DateTime nowUtc, out DateTime dueUtc)
     {
         dueUtc = default;
-        if (_plannedLikesUtc.Count == 0) return false;
-        if (_plannedLikesUtc.Peek() > nowUtc) return false;
-
+        if (_plannedLikesUtc.Count == 0 || _plannedLikesUtc.Peek() > nowUtc) return false;
         dueUtc = _plannedLikesUtc.Dequeue();
         return true;
     }
@@ -453,7 +447,7 @@ internal sealed class AppConfig
 {
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
-    public AutomationConfig Automation { get; set; } = new();
+    public AutomationConfig DefaultAutomation { get; set; } = new();
 
     public static AppConfig CreateDefault() => new();
 }
@@ -466,8 +460,20 @@ internal sealed class AutomationConfig
     public string ScrollActionType { get; set; } = "keyPress";
     public string ScrollKey { get; set; } = "ArrowDown";
     public string ScrollSelector { get; set; } = "";
-
     public int LikesPerPeriod { get; set; } = 2;
     public int LikePeriodMinutes { get; set; } = 10;
     public string LikeKey { get; set; } = "KeyL";
+
+    public AutomationConfig Clone() => new()
+    {
+        WorkDurationMinutes = WorkDurationMinutes,
+        ScrollDelayMinSeconds = ScrollDelayMinSeconds,
+        ScrollDelayMaxSeconds = ScrollDelayMaxSeconds,
+        ScrollActionType = ScrollActionType,
+        ScrollKey = ScrollKey,
+        ScrollSelector = ScrollSelector,
+        LikesPerPeriod = LikesPerPeriod,
+        LikePeriodMinutes = LikePeriodMinutes,
+        LikeKey = LikeKey,
+    };
 }
