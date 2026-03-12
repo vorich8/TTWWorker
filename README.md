@@ -50,6 +50,7 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Пример `scenario.json`
 
+- `launchMode` читается как строковый enum (`AutoStartAndAttach` или `AttachToExisting`).
 ```json
 {
   "startUrl": "https://www.tiktok.com/foryou",

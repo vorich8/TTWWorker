@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Playwright;
 
 const string defaultConfigPath = "scenario.json";
@@ -12,8 +13,21 @@ await app.RunAsync();
 internal sealed class ControlPanel(string configPath)
 {
     private readonly string _configPath = configPath;
-    private readonly JsonSerializerOptions _jsonOptions = new() { WriteIndented = true, PropertyNameCaseInsensitive = true };
+    private readonly JsonSerializerOptions _jsonOptions = CreateJsonOptions();
     private readonly BrowserProfileStore _profileStore = new(Path.Combine(AppContext.BaseDirectory, "managed-profiles"));
+
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions
+        {
+            WriteIndented = true,
+            PropertyNameCaseInsensitive = true,
+        };
+
+        options.Converters.Add(new JsonStringEnumConverter());
+        return options;
+    }
 
     public async Task RunAsync()
     {
@@ -341,7 +355,17 @@ internal sealed class ControlPanel(string configPath)
     private AppConfig LoadConfig()
     {
         var json = File.ReadAllText(_configPath);
-        return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? AppConfig.CreateDefault();
+
+        try
+        {
+            return JsonSerializer.Deserialize<AppConfig>(json, _jsonOptions) ?? AppConfig.CreateDefault();
+        }
+        catch (JsonException ex)
+        {
+            Console.WriteLine($"Ошибка чтения scenario.json: {ex.Message}");
+            Console.WriteLine("Использую настройки по умолчанию для продолжения работы.");
+            return AppConfig.CreateDefault();
+        }
     }
 
     private Task SaveConfigAsync(AppConfig config)
