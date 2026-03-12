@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Collections.Concurrent;
 using System.Text.Json;
 using Microsoft.Playwright;
@@ -207,19 +208,14 @@ internal sealed class ControlPanel(string configPath)
         var profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
 
         using var playwright = await Playwright.CreateAsync();
-        await using var context = await playwright.Chromium.LaunchPersistentContextAsync(
+        await using var session = await ManualBrowserConnector.StartAndConnectAsync(
+            playwright,
+            config.BrowserExecutablePath,
             selectedProfile.UserDataDir,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                ExecutablePath = config.BrowserExecutablePath,
-                Headless = false,
-                Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
-            });
+            config.StartUrl);
 
-        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-        await page.GotoAsync(config.StartUrl);
-
-        Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name}.");
+        var page = session.Page;
+        Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name} (ручной режим запуска браузера).");
         Console.WriteLine("Сейчас введите/подтвердите настройки (Enter = оставить текущее сохранённое значение).");
 
         ConfigureAutomationValues(profileSettings.Automation, config.StartUrl, allowStartUrlEdit: false, out _);
@@ -237,7 +233,6 @@ internal sealed class ControlPanel(string configPath)
 
         while (!cts.Token.IsCancellationRequested)
         {
-            // постоянный рескан глобального json + профиля
             config = LoadConfig();
             profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
             var a = profileSettings.Automation;
@@ -401,6 +396,83 @@ internal sealed class ProfileSettings
     public AutomationConfig Automation { get; set; } = new();
 }
 
+internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process process) : IAsyncDisposable
+{
+    public IPage Page { get; } = page;
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await browser.CloseAsync(); } catch { }
+        try
+        {
+            if (!process.HasExited)
+            {
+                process.Kill(entireProcessTree: true);
+            }
+        }
+        catch { }
+    }
+}
+
+internal static class ManualBrowserConnector
+{
+    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
+    {
+        Directory.CreateDirectory(userDataDir);
+        var port = await PickFreePortAsync(9222);
+
+        var startInfo = new ProcessStartInfo(executablePath)
+        {
+            UseShellExecute = true,
+        };
+
+        startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
+        startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
+        startInfo.ArgumentList.Add("--new-window");
+        startInfo.ArgumentList.Add(startUrl);
+
+        var process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить браузер вручную.");
+        await WaitForCdpAsync(port, 15000);
+
+        var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{port}");
+        var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
+        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+        return new ManualBrowserSession(browser, page, process);
+    }
+
+    private static async Task<int> PickFreePortAsync(int preferred)
+    {
+        if (!await IsPortBusy(preferred)) return preferred;
+        for (var p = preferred + 1; p < preferred + 50; p++)
+        {
+            if (!await IsPortBusy(p)) return p;
+        }
+        throw new InvalidOperationException("Не удалось подобрать свободный порт CDP.");
+    }
+
+    private static async Task<bool> IsPortBusy(int port)
+    {
+        using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(700) };
+        try
+        {
+            using var r = await client.GetAsync($"http://127.0.0.1:{port}/json/version");
+            return r.IsSuccessStatusCode;
+        }
+        catch { return false; }
+    }
+
+    private static async Task WaitForCdpAsync(int port, int timeoutMs)
+    {
+        var start = DateTime.UtcNow;
+        while ((DateTime.UtcNow - start).TotalMilliseconds < timeoutMs)
+        {
+            if (await IsPortBusy(port)) return;
+            await Task.Delay(250);
+        }
+        throw new InvalidOperationException("CDP endpoint не поднялся вовремя.");
+    }
+}
+
 internal static class LikeScheduler
 {
     public static LikeScheduleState CreatePlan(DateTime nowUtc, AutomationConfig cfg) => new(nowUtc, cfg);
@@ -446,7 +518,7 @@ internal sealed class LikeScheduleState
 internal sealed class AppConfig
 {
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
-    public string BrowserExecutablePath { get; set; } = @"C:\Program Files\Google\Chrome\Application\chrome.exe";
+    public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public AutomationConfig DefaultAutomation { get; set; } = new();
 
     public static AppConfig CreateDefault() => new();

@@ -1,11 +1,11 @@
 # TTWWorker
 
-Консольная автоматизация TikTok через Chrome с независимыми профилями и постоянными настройками за каждым профилем.
+Консольная автоматизация TikTok через Яндекс.Браузер с независимыми профилями и постоянными настройками за каждым профилем.
 
 ## Новый порядок работы
 
 1. Выбираете профиль (`Profile 1`, `Profile 2`, ...).
-2. Открывается TikTok сайт **без автодействий**.
+2. Открывается TikTok сайт **без автодействий** (браузер запускается в ручном режиме, не через автоматизированный LaunchPersistentContext).
 3. После открытия вводите/подтверждаете настройки автоматизации.
 4. Настройки сохраняются **навсегда за этим профилем** (`automation-settings.json` внутри профиля).
 5. Только после этого стартует автоматизация.
@@ -41,7 +41,7 @@ dotnet run --project TTWWorker -- scenario.json
 ```json
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "browserExecutablePath": "C:/Program Files/Google/Chrome/Application/chrome.exe",
+  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
   "defaultAutomation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
