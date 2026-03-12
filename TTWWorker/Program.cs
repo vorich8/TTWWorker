@@ -212,7 +212,8 @@ internal sealed class ControlPanel(string configPath)
             playwright,
             config.BrowserExecutablePath,
             selectedProfile.UserDataDir,
-            config.StartUrl);
+            config.StartUrl,
+            config.ForceCloseRunningBrowserBeforeLaunch);
 
         var page = session.Page;
         Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name} (ручной режим запуска браузера).");
@@ -416,13 +417,23 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
 
 internal static class ManualBrowserConnector
 {
-    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
+    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, bool forceCloseRunningBrowserBeforeLaunch)
     {
         Directory.CreateDirectory(userDataDir);
 
         Exception? lastError = null;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
+            if (forceCloseRunningBrowserBeforeLaunch)
+            {
+                var killed = CloseRunningBrowserProcesses(executablePath);
+                if (killed > 0)
+                {
+                    Console.WriteLine($"Закрыто процессов браузера перед запуском: {killed}");
+                    await Task.Delay(1200);
+                }
+            }
+
             var requestedPort = await PickFreePortAsync(9222 + (attempt - 1) * 20);
             Process? process = null;
 
@@ -471,6 +482,27 @@ internal static class ManualBrowserConnector
         throw new InvalidOperationException(
             "CDP endpoint не поднялся даже после повторной попытки. " +
             $"Проверьте, не открыт ли этот же профиль в другом окне, и что путь браузера корректный. Детали: {lastError?.Message}");
+    }
+
+    private static int CloseRunningBrowserProcesses(string executablePath)
+    {
+        var killed = 0;
+        var targetName = Path.GetFileNameWithoutExtension(executablePath);
+        foreach (var process in Process.GetProcessesByName(targetName))
+        {
+            try
+            {
+                if (process.HasExited) continue;
+                process.Kill(entireProcessTree: true);
+                killed++;
+            }
+            catch
+            {
+                // ignore
+            }
+        }
+
+        return killed;
     }
 
     private static async Task<int> PickFreePortAsync(int preferred)
@@ -525,7 +557,7 @@ internal static class ManualBrowserConnector
 
             if (process.HasExited)
             {
-                throw new InvalidOperationException($"Браузер завершился до поднятия CDP. Код выхода: {process.ExitCode}");
+                throw new InvalidOperationException($"Браузер завершился до поднятия CDP. Код выхода: {process.ExitCode}. Возможно, уже был запущен основной браузер с тем же профилем и новый процесс передал ему команду.");
             }
 
             await Task.Delay(300);
@@ -584,6 +616,7 @@ internal sealed class AppConfig
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public AutomationConfig DefaultAutomation { get; set; } = new();
+    public bool ForceCloseRunningBrowserBeforeLaunch { get; set; } = true;
 
     public static AppConfig CreateDefault() => new();
 }
