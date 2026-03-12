@@ -10,7 +10,9 @@
 - `AutoStartAndAttach` — раннер сам стартует браузер и подключается к CDP.
 - `AttachToExisting` — раннер **не стартует и не закрывает** браузер, а подключается к уже поднятому CDP.
 
-Если CDP-режим конфликтует с открытым основным браузером, используйте `PlaywrightPersistent` (по умолчанию) или `AttachToExisting`.
+Если CDP-режим конфликтует с открытым основным браузером, используйте `PlaywrightPersistent` (по умолчанию).
+
+По умолчанию fallback между режимами выключен (`enableModeFallback: false`), чтобы при ошибке в CDP-режиме приложение не перескакивало в другие режимы без вашего разрешения.
 
 ## Новый порядок работы
 
@@ -60,6 +62,7 @@ dotnet run --project TTWWorker -- scenario.json
   "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
   "launchMode": "PlaywrightPersistent",
   "cdpPort": 9222,
+  "enableModeFallback": false,
   "defaultAutomation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,

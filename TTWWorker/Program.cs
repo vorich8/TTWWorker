@@ -97,6 +97,13 @@ internal sealed class ControlPanel(string configPath)
             config.CdpPort = cdpPort;
         }
 
+        Console.Write($"Включить fallback между режимами (true/false), сейчас: {config.EnableModeFallback}: ");
+        var fallbackInput = Console.ReadLine()?.Trim();
+        if (bool.TryParse(fallbackInput, out var fallbackEnabled))
+        {
+            config.EnableModeFallback = fallbackEnabled;
+        }
+
         await SaveConfigAsync(config);
         Console.WriteLine("Глобальные значения по умолчанию сохранены в scenario.json");
     }
@@ -308,13 +315,17 @@ internal sealed class ControlPanel(string configPath)
 
     private async Task<ManualBrowserSession> StartSessionWithFallbackAsync(IPlaywright playwright, AppConfig config, BrowserProfile selectedProfile)
     {
-        var modes = new List<BrowserLaunchMode>
+        var modes = new List<BrowserLaunchMode> { config.LaunchMode };
+        if (config.EnableModeFallback)
         {
-            config.LaunchMode,
-            BrowserLaunchMode.PlaywrightPersistent,
-            BrowserLaunchMode.AutoStartAndAttach,
-            BrowserLaunchMode.AttachToExisting
-        }.Distinct().ToList();
+            modes = new List<BrowserLaunchMode>
+            {
+                config.LaunchMode,
+                BrowserLaunchMode.PlaywrightPersistent,
+                BrowserLaunchMode.AutoStartAndAttach,
+                BrowserLaunchMode.AttachToExisting
+            }.Distinct().ToList();
+        }
 
         Exception? last = null;
         foreach (var mode in modes)
@@ -347,10 +358,14 @@ internal sealed class ControlPanel(string configPath)
             {
                 last = ex;
                 Console.WriteLine($"Режим {mode} не сработал: {ex.Message}");
+                if (!config.EnableModeFallback)
+                {
+                    break;
+                }
             }
         }
 
-        throw new InvalidOperationException($"Не удалось запустить сессию ни в одном режиме. Последняя ошибка: {last?.Message}");
+        throw new InvalidOperationException($"Не удалось запустить сессию в режиме {config.LaunchMode}. Последняя ошибка: {last?.Message}");
     }
 
     private static void ReadCommands(ConcurrentQueue<string> queue, CancellationToken token)
@@ -742,6 +757,7 @@ internal sealed class AppConfig
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public BrowserLaunchMode LaunchMode { get; set; } = BrowserLaunchMode.PlaywrightPersistent;
     public int CdpPort { get; set; } = 9222;
+    public bool EnableModeFallback { get; set; } = false;
     public AutomationConfig DefaultAutomation { get; set; } = new();
 
     public static AppConfig CreateDefault() => new();
