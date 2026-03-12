@@ -36,7 +36,8 @@
 
 - Если VPN/расширения тормозят старт браузера, раннер делает повторный запуск CDP с увеличенным таймаутом и другим портом.
 
-- При `TargetClosedException` раннер автоматически пробует другие режимы запуска (`PlaywrightPersistent`, `AutoStartAndAttach`, `AttachToExisting`) как fallback.
+- При `TargetClosedException` раннер может пробовать другие режимы запуска (`PlaywrightPersistent`, `AutoStartAndAttach`, `AttachToExisting`) только если `enableModeFallback: true`.
+- Если `PlaywrightPersistent` падает с `TargetClosedException`, раннер делает внутренний retry через временную копию профиля (без перехода в CDP-режимы).
 
 ## Запуск
 

@@ -504,7 +504,7 @@ internal sealed class ProfileSettings
     public AutomationConfig Automation { get; set; } = new();
 }
 
-internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process process, IBrowserContext? ownedContext = null) : IAsyncDisposable
+internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process process, IBrowserContext? ownedContext = null, string? tempUserDataDir = null) : IAsyncDisposable
 {
     public IPage Page { get; } = page;
 
@@ -530,6 +530,18 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
             }
         }
         catch { }
+
+        if (!string.IsNullOrWhiteSpace(tempUserDataDir))
+        {
+            try
+            {
+                if (Directory.Exists(tempUserDataDir))
+                {
+                    Directory.Delete(tempUserDataDir, recursive: true);
+                }
+            }
+            catch { }
+        }
     }
 }
 
@@ -537,20 +549,70 @@ internal static class ManualBrowserConnector
 {
     public static async Task<ManualBrowserSession> StartPersistentAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
     {
-        var context = await playwright.Chromium.LaunchPersistentContextAsync(
-            userDataDir,
-            new BrowserTypeLaunchPersistentContextOptions
-            {
-                ExecutablePath = executablePath,
-                Headless = false,
-                Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
-            });
+        try
+        {
+            var context = await playwright.Chromium.LaunchPersistentContextAsync(
+                userDataDir,
+                new BrowserTypeLaunchPersistentContextOptions
+                {
+                    ExecutablePath = executablePath,
+                    Headless = false,
+                    Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
+                });
 
-        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-        await page.GotoAsync(startUrl);
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+            await page.GotoAsync(startUrl);
 
-        var browser = context.Browser ?? throw new InvalidOperationException("Не удалось получить Browser из persistent context.");
-        return new ManualBrowserSession(browser, page, Process.GetCurrentProcess(), context);
+            var browser = context.Browser ?? throw new InvalidOperationException("Не удалось получить Browser из persistent context.");
+            return new ManualBrowserSession(browser, page, Process.GetCurrentProcess(), context);
+        }
+        catch (PlaywrightException ex)
+        {
+            Console.WriteLine($"PlaywrightPersistent не стартовал на основном профиле: {ex.Message}");
+            Console.WriteLine("Пробую PlaywrightPersistent через временную копию профиля...");
+
+            var tempUserDataDir = CreateTempUserDataClone(userDataDir);
+            var context = await playwright.Chromium.LaunchPersistentContextAsync(
+                tempUserDataDir,
+                new BrowserTypeLaunchPersistentContextOptions
+                {
+                    ExecutablePath = executablePath,
+                    Headless = false,
+                    Args = ["--new-window", "--no-first-run", "--no-default-browser-check"]
+                });
+
+            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+            await page.GotoAsync(startUrl);
+
+            var browser = context.Browser ?? throw new InvalidOperationException("Не удалось получить Browser из persistent context (temp). ");
+            return new ManualBrowserSession(browser, page, Process.GetCurrentProcess(), context, tempUserDataDir);
+        }
+    }
+
+    private static string CreateTempUserDataClone(string sourceDir)
+    {
+        var tempDir = Path.Combine(Path.GetTempPath(), "TTWWorker", $"persistent-fallback-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
+        Directory.CreateDirectory(tempDir);
+
+        CopyDirectory(sourceDir, tempDir);
+        return tempDir;
+    }
+
+    private static void CopyDirectory(string sourceDir, string destinationDir)
+    {
+        foreach (var dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, dir);
+            Directory.CreateDirectory(Path.Combine(destinationDir, relative));
+        }
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            var target = Path.Combine(destinationDir, relative);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target, overwrite: true);
+        }
     }
 
     public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, int preferredPort)
