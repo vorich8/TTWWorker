@@ -70,6 +70,19 @@ internal sealed class ControlPanel(string configPath)
             config.StartUrl = updatedUrl;
         }
 
+        Console.Write($"Режим запуска (AutoStartAndAttach / AttachToExisting), сейчас: {config.LaunchMode}: ");
+        var launchMode = Console.ReadLine()?.Trim();
+        if (Enum.TryParse<BrowserLaunchMode>(launchMode, ignoreCase: true, out var parsedMode))
+        {
+            config.LaunchMode = parsedMode;
+        }
+
+        Console.Write($"CDP порт (сейчас: {config.CdpPort}): ");
+        if (int.TryParse(Console.ReadLine(), out var cdpPort) && cdpPort > 0)
+        {
+            config.CdpPort = cdpPort;
+        }
+
         await SaveConfigAsync(config);
         Console.WriteLine("Глобальные значения по умолчанию сохранены в scenario.json");
     }
@@ -208,11 +221,21 @@ internal sealed class ControlPanel(string configPath)
         var profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
 
         using var playwright = await Playwright.CreateAsync();
-        await using var session = await ManualBrowserConnector.StartAndConnectAsync(
-            playwright,
-            config.BrowserExecutablePath,
-            selectedProfile.UserDataDir,
-            config.StartUrl);
+        await using var session = config.LaunchMode switch
+        {
+            BrowserLaunchMode.AttachToExisting => await ManualBrowserConnector.AttachToExistingAsync(
+                playwright,
+                config.BrowserExecutablePath,
+                selectedProfile.UserDataDir,
+                config.StartUrl,
+                config.CdpPort),
+            _ => await ManualBrowserConnector.StartAndConnectAsync(
+                playwright,
+                config.BrowserExecutablePath,
+                selectedProfile.UserDataDir,
+                config.StartUrl,
+                config.CdpPort),
+        };
 
         var page = session.Page;
         Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name} (ручной режим запуска браузера).");
@@ -409,7 +432,7 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
         try { await browser.CloseAsync(); } catch { }
         try
         {
-            if (!process.HasExited)
+            if (process.Id != Process.GetCurrentProcess().Id && !process.HasExited)
             {
                 process.Kill(entireProcessTree: true);
             }
@@ -420,14 +443,14 @@ internal sealed class ManualBrowserSession(IBrowser browser, IPage page, Process
 
 internal static class ManualBrowserConnector
 {
-    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl)
+    public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, int preferredPort)
     {
         Directory.CreateDirectory(userDataDir);
 
         Exception? lastError = null;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var requestedPort = await PickFreePortAsync(9222 + (attempt - 1) * 20);
+            var requestedPort = await PickFreePortAsync(preferredPort + (attempt - 1) * 20);
             Process? process = null;
 
             try
@@ -475,6 +498,41 @@ internal static class ManualBrowserConnector
         throw new InvalidOperationException(
             "CDP endpoint не поднялся даже после повторной попытки. " +
             $"Проверьте, не открыт ли этот же профиль в другом окне, и что путь браузера корректный. Детали: {lastError?.Message}");
+    }
+
+    public static async Task<ManualBrowserSession> AttachToExistingAsync(
+        IPlaywright playwright,
+        string executablePath,
+        string userDataDir,
+        string startUrl,
+        int cdpPort)
+    {
+        Console.WriteLine("Режим AttachToExisting: основной браузер не закрывается и новый процесс не стартует.");
+        Console.WriteLine("1) В отдельном окне/профиле запустите браузер вручную с CDP:");
+        Console.WriteLine($"   \"{executablePath}\" --remote-debugging-port={cdpPort} --remote-debugging-address=127.0.0.1 --user-data-dir=\"{userDataDir}\" --new-window {startUrl}");
+        Console.WriteLine("2) Дождитесь открытия TikTok и нажмите Enter для подключения...");
+        Console.ReadLine();
+
+        await WaitForCdpPortOnlyAsync(cdpPort, 90000);
+        Console.WriteLine($"CDP обнаружен на порту {cdpPort}, подключаюсь...");
+
+        var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{cdpPort}");
+        var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
+        var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
+
+        return new ManualBrowserSession(browser, page, Process.GetCurrentProcess());
+    }
+
+    private static async Task WaitForCdpPortOnlyAsync(int port, int timeoutMs)
+    {
+        var start = DateTime.UtcNow;
+        while ((DateTime.UtcNow - start).TotalMilliseconds < timeoutMs)
+        {
+            if (await IsPortReadyAsync(port)) return;
+            await Task.Delay(400);
+        }
+
+        throw new InvalidOperationException($"CDP endpoint на порту {port} не поднялся за {timeoutMs / 1000} сек.");
     }
 
     private static async Task<int> PickFreePortAsync(int preferred)
@@ -587,9 +645,17 @@ internal sealed class AppConfig
 {
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public string BrowserExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
+    public BrowserLaunchMode LaunchMode { get; set; } = BrowserLaunchMode.AutoStartAndAttach;
+    public int CdpPort { get; set; } = 9222;
     public AutomationConfig DefaultAutomation { get; set; } = new();
 
     public static AppConfig CreateDefault() => new();
+}
+
+internal enum BrowserLaunchMode
+{
+    AutoStartAndAttach,
+    AttachToExisting
 }
 
 internal sealed class AutomationConfig
