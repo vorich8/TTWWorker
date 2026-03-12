@@ -423,27 +423,30 @@ internal static class ManualBrowserConnector
         Exception? lastError = null;
         for (var attempt = 1; attempt <= 2; attempt++)
         {
-            var port = await PickFreePortAsync(9222 + (attempt - 1) * 20);
+            var requestedPort = await PickFreePortAsync(9222 + (attempt - 1) * 20);
             Process? process = null;
 
             try
             {
                 var startInfo = new ProcessStartInfo(executablePath)
                 {
-                    UseShellExecute = true,
+                    UseShellExecute = false,
                 };
 
-                startInfo.ArgumentList.Add($"--remote-debugging-port={port}");
+                startInfo.ArgumentList.Add($"--remote-debugging-port={requestedPort}");
+                startInfo.ArgumentList.Add("--remote-debugging-address=127.0.0.1");
                 startInfo.ArgumentList.Add($"--user-data-dir={userDataDir}");
                 startInfo.ArgumentList.Add("--new-window");
                 startInfo.ArgumentList.Add(startUrl);
 
                 process = Process.Start(startInfo) ?? throw new InvalidOperationException("Не удалось запустить браузер вручную.");
+                Console.WriteLine($"Запущен процесс браузера PID={process.Id}, ожидаю CDP...");
 
                 var timeoutMs = attempt == 1 ? 30000 : 60000;
-                await WaitForCdpAsync(port, timeoutMs, process);
+                var actualPort = await WaitForCdpAsync(requestedPort, userDataDir, timeoutMs, process);
 
-                var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{port}");
+                Console.WriteLine($"CDP поднялся на порту {actualPort}.");
+                var browser = await playwright.Chromium.ConnectOverCDPAsync($"http://127.0.0.1:{actualPort}");
                 var context = browser.Contexts.FirstOrDefault() ?? await browser.NewContextAsync();
                 var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
                 return new ManualBrowserSession(browser, page, process);
@@ -465,20 +468,22 @@ internal static class ManualBrowserConnector
             }
         }
 
-        throw new InvalidOperationException($"CDP endpoint не поднялся даже после повторной попытки. {lastError?.Message}");
+        throw new InvalidOperationException(
+            "CDP endpoint не поднялся даже после повторной попытки. " +
+            $"Проверьте, не открыт ли этот же профиль в другом окне, и что путь браузера корректный. Детали: {lastError?.Message}");
     }
 
     private static async Task<int> PickFreePortAsync(int preferred)
     {
-        if (!await IsPortBusy(preferred)) return preferred;
+        if (!await IsPortReadyAsync(preferred)) return preferred;
         for (var p = preferred + 1; p < preferred + 50; p++)
         {
-            if (!await IsPortBusy(p)) return p;
+            if (!await IsPortReadyAsync(p)) return p;
         }
         throw new InvalidOperationException("Не удалось подобрать свободный порт CDP.");
     }
 
-    private static async Task<bool> IsPortBusy(int port)
+    private static async Task<bool> IsPortReadyAsync(int port)
     {
         using var client = new HttpClient { Timeout = TimeSpan.FromMilliseconds(700) };
         try
@@ -489,12 +494,34 @@ internal static class ManualBrowserConnector
         catch { return false; }
     }
 
-    private static async Task WaitForCdpAsync(int port, int timeoutMs, Process process)
+    private static bool TryReadDevToolsPort(string userDataDir, out int port)
+    {
+        port = 0;
+        var file = Path.Combine(userDataDir, "DevToolsActivePort");
+        if (!File.Exists(file)) return false;
+
+        try
+        {
+            var firstLine = File.ReadLines(file).FirstOrDefault();
+            return int.TryParse(firstLine, out port) && port > 0;
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    private static async Task<int> WaitForCdpAsync(int requestedPort, string userDataDir, int timeoutMs, Process process)
     {
         var start = DateTime.UtcNow;
         while ((DateTime.UtcNow - start).TotalMilliseconds < timeoutMs)
         {
-            if (await IsPortBusy(port)) return;
+            if (await IsPortReadyAsync(requestedPort)) return requestedPort;
+
+            if (TryReadDevToolsPort(userDataDir, out var discoveredPort) && await IsPortReadyAsync(discoveredPort))
+            {
+                return discoveredPort;
+            }
 
             if (process.HasExited)
             {
@@ -504,7 +531,9 @@ internal static class ManualBrowserConnector
             await Task.Delay(300);
         }
 
-        throw new InvalidOperationException($"CDP endpoint не поднялся за {timeoutMs / 1000} сек.");
+        var devToolsFile = Path.Combine(userDataDir, "DevToolsActivePort");
+        var devToolsHint = File.Exists(devToolsFile) ? $"Файл {devToolsFile} существует, но порт недоступен." : $"Файл {devToolsFile} не создан.";
+        throw new InvalidOperationException($"CDP endpoint не поднялся за {timeoutMs / 1000} сек. {devToolsHint}");
     }
 }
 
