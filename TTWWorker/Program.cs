@@ -569,9 +569,9 @@ internal static class ManualBrowserConnector
         catch (PlaywrightException ex)
         {
             Console.WriteLine($"PlaywrightPersistent не стартовал на основном профиле: {ex.Message}");
-            Console.WriteLine("Пробую PlaywrightPersistent через временную копию профиля...");
+            Console.WriteLine("Пробую PlaywrightPersistent через временный изолированный профиль...");
 
-            var tempUserDataDir = CreateTempUserDataClone(userDataDir);
+            var tempUserDataDir = CreateTempUserDataDir();
             var context = await playwright.Chromium.LaunchPersistentContextAsync(
                 tempUserDataDir,
                 new BrowserTypeLaunchPersistentContextOptions
@@ -589,30 +589,11 @@ internal static class ManualBrowserConnector
         }
     }
 
-    private static string CreateTempUserDataClone(string sourceDir)
+    private static string CreateTempUserDataDir()
     {
         var tempDir = Path.Combine(Path.GetTempPath(), "TTWWorker", $"persistent-fallback-{DateTime.UtcNow:yyyyMMdd-HHmmss-fff}");
         Directory.CreateDirectory(tempDir);
-
-        CopyDirectory(sourceDir, tempDir);
         return tempDir;
-    }
-
-    private static void CopyDirectory(string sourceDir, string destinationDir)
-    {
-        foreach (var dir in Directory.GetDirectories(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceDir, dir);
-            Directory.CreateDirectory(Path.Combine(destinationDir, relative));
-        }
-
-        foreach (var file in Directory.GetFiles(sourceDir, "*", SearchOption.AllDirectories))
-        {
-            var relative = Path.GetRelativePath(sourceDir, file);
-            var target = Path.Combine(destinationDir, relative);
-            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
-            File.Copy(file, target, overwrite: true);
-        }
     }
 
     public static async Task<ManualBrowserSession> StartAndConnectAsync(IPlaywright playwright, string executablePath, string userDataDir, string startUrl, int preferredPort)
