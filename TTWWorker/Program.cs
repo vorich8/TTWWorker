@@ -235,26 +235,7 @@ internal sealed class ControlPanel(string configPath)
         var profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
 
         using var playwright = await Playwright.CreateAsync();
-        await using var session = config.LaunchMode switch
-        {
-            BrowserLaunchMode.PlaywrightPersistent => await ManualBrowserConnector.StartPersistentAsync(
-                playwright,
-                config.BrowserExecutablePath,
-                selectedProfile.UserDataDir,
-                config.StartUrl),
-            BrowserLaunchMode.AttachToExisting => await ManualBrowserConnector.AttachToExistingAsync(
-                playwright,
-                config.BrowserExecutablePath,
-                selectedProfile.UserDataDir,
-                config.StartUrl,
-                config.CdpPort),
-            _ => await ManualBrowserConnector.StartAndConnectAsync(
-                playwright,
-                config.BrowserExecutablePath,
-                selectedProfile.UserDataDir,
-                config.StartUrl,
-                config.CdpPort),
-        };
+        await using var session = await StartSessionWithFallbackAsync(playwright, config, selectedProfile);
 
         var page = session.Page;
         Console.WriteLine($"Открыт TikTok для профиля {selectedProfile.Name} (ручной режим запуска браузера).");
@@ -277,43 +258,99 @@ internal sealed class ControlPanel(string configPath)
         var runStartedAt = DateTime.UtcNow;
         var likesPlan = LikeScheduler.CreatePlan(DateTime.UtcNow, profileSettings.Automation);
 
-        while (!cts.Token.IsCancellationRequested)
+        try
         {
-            config = LoadConfig();
-            profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
-            var a = profileSettings.Automation;
-
-            if (DateTime.UtcNow >= runStartedAt.AddMinutes(Math.Max(1, a.WorkDurationMinutes)))
+            while (!cts.Token.IsCancellationRequested)
             {
-                Console.WriteLine("Время работы вышло. Автоматизация завершена.");
-                break;
+                config = LoadConfig();
+                profileSettings = ProfileSettingsStore.LoadOrCreate(selectedProfile, config.DefaultAutomation, _jsonOptions);
+                var a = profileSettings.Automation;
+
+                if (DateTime.UtcNow >= runStartedAt.AddMinutes(Math.Max(1, a.WorkDurationMinutes)))
+                {
+                    Console.WriteLine("Время работы вышло. Автоматизация завершена.");
+                    break;
+                }
+
+                await ExecuteCommandsAsync(page, a, queue, cts);
+                await ExecuteScheduledLikesAsync(page, a, likesPlan);
+
+                var delaySec = Random.Shared.Next(Math.Max(1, a.ScrollDelayMinSeconds), Math.Max(a.ScrollDelayMinSeconds, a.ScrollDelayMaxSeconds) + 1);
+                Console.WriteLine($"Ожидание {delaySec} сек...");
+                await page.WaitForTimeoutAsync(delaySec * 1000);
+
+                await ExecuteCommandsAsync(page, a, queue, cts);
+                await ExecuteScheduledLikesAsync(page, a, likesPlan);
+                if (cts.Token.IsCancellationRequested) break;
+
+                if (a.ScrollActionType == "click" && !string.IsNullOrWhiteSpace(a.ScrollSelector))
+                {
+                    await page.ClickAsync(a.ScrollSelector);
+                    Console.WriteLine($"Листание: click по {a.ScrollSelector}");
+                }
+                else
+                {
+                    var key = string.IsNullOrWhiteSpace(a.ScrollKey) ? "ArrowDown" : a.ScrollKey;
+                    await page.Keyboard.PressAsync(key);
+                    Console.WriteLine($"Листание: keyPress {key}");
+                }
             }
-
-            await ExecuteCommandsAsync(page, a, queue, cts);
-            await ExecuteScheduledLikesAsync(page, a, likesPlan);
-
-            var delaySec = Random.Shared.Next(Math.Max(1, a.ScrollDelayMinSeconds), Math.Max(a.ScrollDelayMinSeconds, a.ScrollDelayMaxSeconds) + 1);
-            Console.WriteLine($"Ожидание {delaySec} сек...");
-            await page.WaitForTimeoutAsync(delaySec * 1000);
-
-            await ExecuteCommandsAsync(page, a, queue, cts);
-            await ExecuteScheduledLikesAsync(page, a, likesPlan);
-            if (cts.Token.IsCancellationRequested) break;
-
-            if (a.ScrollActionType == "click" && !string.IsNullOrWhiteSpace(a.ScrollSelector))
-            {
-                await page.ClickAsync(a.ScrollSelector);
-                Console.WriteLine($"Листание: click по {a.ScrollSelector}");
-            }
-            else
-            {
-                var key = string.IsNullOrWhiteSpace(a.ScrollKey) ? "ArrowDown" : a.ScrollKey;
-                await page.Keyboard.PressAsync(key);
-                Console.WriteLine($"Листание: keyPress {key}");
-            }
+        }
+        catch (PlaywrightException ex)
+        {
+            Console.WriteLine("Сессия браузера была закрыта во время работы.");
+            Console.WriteLine($"Детали: {ex.Message}");
+            Console.WriteLine("Рекомендация: попробуйте режим PlaywrightPersistent или AttachToExisting.");
         }
 
         cts.Cancel();
+    }
+
+    private async Task<ManualBrowserSession> StartSessionWithFallbackAsync(IPlaywright playwright, AppConfig config, BrowserProfile selectedProfile)
+    {
+        var modes = new List<BrowserLaunchMode>
+        {
+            config.LaunchMode,
+            BrowserLaunchMode.PlaywrightPersistent,
+            BrowserLaunchMode.AutoStartAndAttach,
+            BrowserLaunchMode.AttachToExisting
+        }.Distinct().ToList();
+
+        Exception? last = null;
+        foreach (var mode in modes)
+        {
+            try
+            {
+                Console.WriteLine($"Пробую режим запуска: {mode}");
+                return mode switch
+                {
+                    BrowserLaunchMode.PlaywrightPersistent => await ManualBrowserConnector.StartPersistentAsync(
+                        playwright,
+                        config.BrowserExecutablePath,
+                        selectedProfile.UserDataDir,
+                        config.StartUrl),
+                    BrowserLaunchMode.AttachToExisting => await ManualBrowserConnector.AttachToExistingAsync(
+                        playwright,
+                        config.BrowserExecutablePath,
+                        selectedProfile.UserDataDir,
+                        config.StartUrl,
+                        config.CdpPort),
+                    _ => await ManualBrowserConnector.StartAndConnectAsync(
+                        playwright,
+                        config.BrowserExecutablePath,
+                        selectedProfile.UserDataDir,
+                        config.StartUrl,
+                        config.CdpPort),
+                };
+            }
+            catch (Exception ex)
+            {
+                last = ex;
+                Console.WriteLine($"Режим {mode} не сработал: {ex.Message}");
+            }
+        }
+
+        throw new InvalidOperationException($"Не удалось запустить сессию ни в одном режиме. Последняя ошибка: {last?.Message}");
     }
 
     private static void ReadCommands(ConcurrentQueue<string> queue, CancellationToken token)
