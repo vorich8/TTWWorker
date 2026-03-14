@@ -176,15 +176,16 @@ internal sealed class YandexControlPanel(string configPath)
             await SaveConfigAsync(cfg);
         }
 
-        var profileDir = cfg.Browser.UseSystemUserData
+        var launchUserDataDir = cfg.Browser.UseSystemUserData
             ? cfg.Browser.SystemUserDataDir
-            : Path.Combine(cfg.Browser.ProfilesRoot, cfg.Browser.ProfileName);
+            : cfg.Browser.ProfilesRoot;
 
-        Directory.CreateDirectory(profileDir);
+        var launchProfileDir = cfg.Browser.ProfileName;
+        Directory.CreateDirectory(Path.Combine(launchUserDataDir, launchProfileDir));
 
-        Console.WriteLine("Запускаю Яндекс.Браузер в отдельном профиле...");
-        Console.WriteLine($"Профиль: {profileDir}");
-        Console.WriteLine($"Profile directory: {cfg.Browser.ProfileName}");
+        Console.WriteLine("Запускаю Яндекс.Браузер...");
+        Console.WriteLine($"User Data: {launchUserDataDir}");
+        Console.WriteLine($"Profile directory: {launchProfileDir}");
 
         var launchArgs = new List<string>
         {
@@ -197,7 +198,7 @@ internal sealed class YandexControlPanel(string configPath)
         try
         {
             using var playwright = await Playwright.CreateAsync();
-            var launch = await LaunchContextWithFallbackAsync(playwright, cfg, profileDir, launchArgs);
+            var launch = await LaunchContextWithFallbackAsync(playwright, cfg, launchUserDataDir, launchArgs);
             var context = launch.Context;
 
             // Всегда создаём отдельную вкладку под TikTok, чтобы не оставаться на about:blank.
@@ -269,7 +270,7 @@ internal sealed class YandexControlPanel(string configPath)
         }
     }
 
-    private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string profileDir, IReadOnlyList<string> launchArgs)
+    private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string launchUserDataDir, IReadOnlyList<string> launchArgs)
     {
         if (cfg.Browser.UseSystemUserData)
         {
@@ -292,7 +293,7 @@ internal sealed class YandexControlPanel(string configPath)
 
         try
         {
-            var context = await LaunchContextAsync(playwright, cfg, profileDir, launchArgs);
+            var context = await LaunchContextAsync(playwright, cfg, launchUserDataDir, launchArgs);
             return new LaunchResult(context, null);
         }
         catch (PlaywrightException ex)

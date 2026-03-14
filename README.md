@@ -8,7 +8,7 @@
 - Бот запускает Яндекс.Браузер напрямую через `browser.exe`.
 - Можно запускать в двух режимах профиля:
   - `useSystemUserData: true` — брать данные из системного `User Data` + `profileName`, но запускать браузер через временный клон профиля (чтобы не конфликтовать с уже открытым основным браузером).
-  - `useSystemUserData: false` — использовать отдельный профиль в `profilesRoot`.
+  - `useSystemUserData: false` — использовать отдельный профиль в `profilesRoot` (бот запускает `userDataDir=profilesRoot` и `--profile-directory=<profileName>`).
 - В конфиг добавлен явный `userAgent` для стабильного входа/работы аккаунта.
 - Для установки расширений отключены Playwright-флаги `--enable-automation` и `--disable-extensions`.
 - В режиме `useSystemUserData: true` бот сразу запускается через временную копию выбранного профиля, чтобы не ловить падение при занятом системном профиле.
