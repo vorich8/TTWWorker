@@ -39,7 +39,8 @@ dotnet run --project TTWWorker -- scenario.json
   "startUrl": "https://www.tiktok.com/foryou",
   "dolphin": {
     "apiBaseUrl": "http://127.0.0.1:3001",
-    "profileId": ""
+    "profileId": "",
+    "apiToken": ""
   },
   "automation": {
     "workDurationMinutes": 60,
@@ -56,5 +57,6 @@ dotnet run --project TTWWorker -- scenario.json
 ### Важно
 
 1. В `dolphin.profileId` укажите ID профиля из Dolphin Anty.
-2. Локальный API Dolphin должен быть доступен по `apiBaseUrl`.
-3. Если API отвечает нестандартным JSON, подскажи пример ответа — быстро подгоню парсер под твою версию.
+2. Добавьте `dolphin.apiToken` (JWT токен Dolphin API), иначе часть endpoint может отвечать `401 invalid session token`.
+3. Локальный API Dolphin должен быть доступен по `apiBaseUrl`.
+4. Если API отвечает нестандартным JSON, подскажи пример ответа — быстро подгоню парсер под твою версию.

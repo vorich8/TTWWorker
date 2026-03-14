@@ -78,6 +78,13 @@ internal sealed class DolphinControlPanel(string configPath)
         var profileId = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(profileId)) cfg.Dolphin.ProfileId = profileId;
 
+        var tokenPreview = string.IsNullOrWhiteSpace(cfg.Dolphin.ApiToken)
+            ? "<не задан>"
+            : MaskToken(cfg.Dolphin.ApiToken);
+        Console.Write($"Dolphin API Token (сейчас: {tokenPreview}): ");
+        var apiToken = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(apiToken)) cfg.Dolphin.ApiToken = apiToken;
+
         Console.Write($"URL старта (сейчас: {cfg.StartUrl}): ");
         var startUrl = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(startUrl)) cfg.StartUrl = startUrl;
@@ -123,7 +130,7 @@ internal sealed class DolphinControlPanel(string configPath)
             return;
         }
 
-        using var dolphin = new DolphinClient(cfg.Dolphin.ApiBaseUrl);
+        using var dolphin = new DolphinClient(cfg.Dolphin.ApiBaseUrl, cfg.Dolphin.ApiToken);
 
         DolphinStartResponse? start = null;
         try
@@ -290,11 +297,33 @@ internal sealed class DolphinControlPanel(string configPath)
     }
 
     private Task SaveConfigAsync(DolphinScenario cfg) => File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(cfg, _json));
+
+    private static string MaskToken(string token)
+    {
+        if (string.IsNullOrWhiteSpace(token))
+            return "<не задан>";
+
+        if (token.Length <= 10)
+            return new string('*', token.Length);
+
+        return $"{token[..6]}...{token[^4..]}";
+    }
 }
 
-internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
+internal sealed class DolphinClient : IDisposable
 {
-    private readonly HttpClient _http = new() { BaseAddress = new Uri(apiBaseUrl.TrimEnd('/') + "/") };
+    private readonly HttpClient _http;
+
+    public DolphinClient(string apiBaseUrl, string? apiToken)
+    {
+        _http = new HttpClient
+        {
+            BaseAddress = new Uri(apiBaseUrl.TrimEnd('/') + "/")
+        };
+
+        if (!string.IsNullOrWhiteSpace(apiToken))
+            _http.DefaultRequestHeaders.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", apiToken);
+    }
 
     public async Task<DolphinStartResponse?> StartProfileAsync(string profileId)
     {
@@ -451,6 +480,7 @@ internal sealed class DolphinConfig
 {
     public string ApiBaseUrl { get; set; } = "http://127.0.0.1:3001";
     public string ProfileId { get; set; } = "";
+    public string ApiToken { get; set; } = "";
 }
 
 internal sealed class DolphinStartResponse
