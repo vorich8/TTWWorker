@@ -543,7 +543,7 @@ internal sealed class BrowserConfig
     public string ProfilesRoot { get; set; } = "managed-profiles";
     public string ProfileName { get; set; } = "Profile 1";
     public bool UseSystemUserData { get; set; }
-    public bool UseMainBrowserInputMode { get; set; } = true;
+    public bool UseMainBrowserInputMode { get; set; } = false;
     public string SystemUserDataDir { get; set; } = @"C:\Users\Администратор\AppData\Local\Yandex\YandexBrowser\User Data";
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36";
 }

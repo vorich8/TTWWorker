@@ -2,25 +2,16 @@
 
 Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright**.
 
-## Важное обновление
-
-Добавлен режим **основного браузера** (по умолчанию):
-- `browser.useMainBrowserInputMode: true`
-- бот НЕ запускает новый браузерный процесс;
-- вы вручную открываете TikTok в основном браузере;
-- бот отправляет нажатия клавиш (листание/лайк) в активное окно.
-
-Это сделано как fallback, когда запуск отдельного автоматизированного окна нестабилен.
-
 ## Режимы работы
 
-1. **Основной браузер (рекомендуется сейчас)**
-   - `useMainBrowserInputMode: true`
-   - работает прямо в уже открытом браузере.
-
-2. **Playwright persistent**
+1. **Playwright persistent (по умолчанию, полный функционал)**
    - `useMainBrowserInputMode: false`
-   - бот запускает `browser.exe` сам (с системным User Data или отдельным профилем).
+   - бот сам запускает `browser.exe` и управляет страницей через Playwright.
+
+2. **Основной браузер (резервный fallback)**
+   - `useMainBrowserInputMode: true`
+   - вы вручную открываете TikTok в основном браузере,
+   - бот отправляет в активное окно только клавиши (листание/лайк).
 
 ## Запуск
 
@@ -46,7 +37,7 @@ dotnet run --project TTWWorker -- scenario.json
     "profilesRoot": "managed-profiles",
     "profileName": "Default",
     "useSystemUserData": true,
-    "useMainBrowserInputMode": true,
+    "useMainBrowserInputMode": false,
     "systemUserDataDir": "C:/Users/Администратор/AppData/Local/Yandex/YandexBrowser/User Data",
     "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
   },
@@ -65,6 +56,6 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Важно
 
-1. Для режима основного браузера держите окно TikTok активным (в фокусе).
-2. Во время работы доступны команды: `like`, `stop`.
-3. Если нужна старая схема отдельного окна — отключите `useMainBrowserInputMode`.
+1. Если нужен полный функционал автоматизации — оставьте `useMainBrowserInputMode: false`.
+2. Режим `true` используйте только как fallback, если отдельное окно не стартует.
+3. Во время работы команды: `like`, `stop`.
