@@ -647,7 +647,7 @@ internal sealed class DolphinClient : IDisposable
             return true;
         }
 
-        var chunks = value.Split(':', '/', '?', ' ', '\t', '\r', '\n', StringSplitOptions.RemoveEmptyEntries);
+        var chunks = value.Split(new[] { ':', '/', '?', ' ', '\t', '\r', '\n' }, StringSplitOptions.RemoveEmptyEntries);
         foreach (var chunk in chunks.Reverse())
         {
             if (int.TryParse(chunk, out var parsed) && parsed is > 0 and <= 65535)
