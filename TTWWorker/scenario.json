@@ -13,5 +13,6 @@
     "likesPerPeriod": 2,
     "likePeriodMinutes": 10,
     "likeKey": "KeyL"
-  }
+  },
+  "automationConfigured": true
 }

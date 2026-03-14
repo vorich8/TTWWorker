@@ -117,6 +117,7 @@ internal sealed class DolphinControlPanel(string configPath)
         var likeKey = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(likeKey)) cfg.Automation.LikeKey = likeKey;
 
+        cfg.AutomationConfigured = true;
         await SaveConfigAsync(cfg);
         Console.WriteLine("Сценарий сохранён.");
     }
@@ -128,6 +129,14 @@ internal sealed class DolphinControlPanel(string configPath)
         {
             Console.WriteLine("Не указан Dolphin ProfileId.");
             return;
+        }
+
+        if (!cfg.AutomationConfigured)
+        {
+            Console.WriteLine("Настройки автоматизации ещё не сохранены. Запускаю первичную настройку...");
+            PromptAutomationSettings(cfg.Automation);
+            cfg.AutomationConfigured = true;
+            await SaveConfigAsync(cfg);
         }
 
         using var dolphin = new DolphinClient(cfg.Dolphin.ApiBaseUrl, cfg.Dolphin.ApiToken);
@@ -296,6 +305,37 @@ internal sealed class DolphinControlPanel(string configPath)
         }
     }
 
+    private static void PromptAutomationSettings(AutomationConfig automation)
+    {
+        Console.Write($"Время работы, минут (сейчас: {automation.WorkDurationMinutes}): ");
+        if (int.TryParse(Console.ReadLine(), out var minutes) && minutes > 0)
+            automation.WorkDurationMinutes = minutes;
+
+        Console.Write($"Мин. задержка листания, сек (сейчас: {automation.ScrollDelayMinSeconds}): ");
+        if (int.TryParse(Console.ReadLine(), out var minDelay) && minDelay > 0)
+            automation.ScrollDelayMinSeconds = minDelay;
+
+        Console.Write($"Макс. задержка листания, сек (сейчас: {automation.ScrollDelayMaxSeconds}): ");
+        if (int.TryParse(Console.ReadLine(), out var maxDelay) && maxDelay >= automation.ScrollDelayMinSeconds)
+            automation.ScrollDelayMaxSeconds = maxDelay;
+
+        Console.Write($"Лайков за период (сейчас: {automation.LikesPerPeriod}): ");
+        if (int.TryParse(Console.ReadLine(), out var likes) && likes >= 0)
+            automation.LikesPerPeriod = likes;
+
+        Console.Write($"Период лайков, минут (сейчас: {automation.LikePeriodMinutes}): ");
+        if (int.TryParse(Console.ReadLine(), out var periodMin) && periodMin > 0)
+            automation.LikePeriodMinutes = periodMin;
+
+        Console.Write($"Клавиша листания (сейчас: {automation.ScrollKey}): ");
+        var scrollKey = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(scrollKey)) automation.ScrollKey = scrollKey;
+
+        Console.Write($"Клавиша лайка (сейчас: {automation.LikeKey}): ");
+        var likeKey = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(likeKey)) automation.LikeKey = likeKey;
+    }
+
     private Task SaveConfigAsync(DolphinScenario cfg) => File.WriteAllTextAsync(_configPath, JsonSerializer.Serialize(cfg, _json));
 
     private static string MaskToken(string token)
@@ -341,53 +381,42 @@ internal sealed class DolphinClient : IDisposable
         var sawSuccessWithoutEndpoint = false;
         var sawAlreadyRunning = false;
 
-        for (var cycle = 0; cycle < 2; cycle++)
+        foreach (var attempt in attempts)
         {
-            var cycleSawAlreadyRunning = false;
+            using var request = new HttpRequestMessage(attempt.Method, attempt.Path);
+            using var response = await _http.SendAsync(request);
+            var raw = await response.Content.ReadAsStringAsync();
 
-            foreach (var attempt in attempts)
+            if (!response.IsSuccessStatusCode)
             {
-                using var request = new HttpRequestMessage(attempt.Method, attempt.Path);
-                using var response = await _http.SendAsync(request);
-                var raw = await response.Content.ReadAsStringAsync();
+                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired && raw.Contains("free plan", StringComparison.OrdinalIgnoreCase))
+                    sawFreePlanAutomationError = true;
 
-                if (!response.IsSuccessStatusCode)
-                {
-                    if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired && raw.Contains("free plan", StringComparison.OrdinalIgnoreCase))
-                        sawFreePlanAutomationError = true;
+                if (raw.Contains("invalid session token", StringComparison.OrdinalIgnoreCase))
+                    sawInvalidSessionToken = true;
 
-                    if (raw.Contains("invalid session token", StringComparison.OrdinalIgnoreCase))
-                        sawInvalidSessionToken = true;
+                if (IsProfileAlreadyRunningError(raw))
+                    sawAlreadyRunning = true;
 
-                    if (IsProfileAlreadyRunningError(raw))
-                    {
-                        sawAlreadyRunning = true;
-                        cycleSawAlreadyRunning = true;
-                    }
-
-                    errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
-                    continue;
-                }
-
-                var parsed = TryParseStartResponse(raw, out var parseError);
-                if (parsed is not null)
-                    return parsed;
-
-                if (raw.Contains("\"success\":true", StringComparison.OrdinalIgnoreCase))
-                    sawSuccessWithoutEndpoint = true;
-
-                errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
+                errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
+                continue;
             }
 
-            if (!cycleSawAlreadyRunning || cycle > 0)
-                break;
+            var parsed = TryParseStartResponse(raw, out var parseError);
+            if (parsed is not null)
+                return parsed;
 
-            var stopped = await TryStopProfileIgnoringErrors(profileId, errors);
-            if (!stopped)
-                break;
+            if (raw.Contains("\"success\":true", StringComparison.OrdinalIgnoreCase))
+                sawSuccessWithoutEndpoint = true;
 
-            errors.Add("Обнаружено, что профиль уже запущен. Выполнен stop и повторная попытка start...");
-            await Task.Delay(1200);
+            errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
+        }
+
+        if (sawAlreadyRunning)
+        {
+            var existing = await TryAttachToRunningProfileAsync(profileId, errors);
+            if (existing is not null)
+                return existing;
         }
 
         var hints = new List<string>();
@@ -398,7 +427,7 @@ internal sealed class DolphinClient : IDisposable
         }
 
         if (sawAlreadyRunning)
-            hints.Add("Профиль уже был запущен. Приложение попыталось перезапустить его автоматически (stop + start). Если ошибка осталась — закройте профиль вручную в Dolphin и повторите.");
+            hints.Add("Профиль уже был запущен вручную. Приложение попыталось получить endpoint уже запущенного профиля без его остановки.");
 
         if (sawInvalidSessionToken)
             hints.Add("Есть ответы 'invalid session token' — проверьте `dolphin.apiToken` в scenario.json и повторите запуск.");
@@ -413,25 +442,43 @@ internal sealed class DolphinClient : IDisposable
             (hints.Count > 0 ? "\n\nЧто это значит:\n- " + string.Join("\n- ", hints) : string.Empty));
     }
 
-    private async Task<bool> TryStopProfileIgnoringErrors(string profileId, List<string> errors)
+    private async Task<DolphinStartResponse?> TryAttachToRunningProfileAsync(string profileId, List<string> errors)
     {
-        try
+        var paths = new[]
         {
-            using var response = await _http.GetAsync($"v1.0/browser_profiles/{profileId}/stop");
-            var raw = await response.Content.ReadAsStringAsync();
-            if (!response.IsSuccessStatusCode)
-            {
-                errors.Add($"GET v1.0/browser_profiles/{profileId}/stop -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
-                return false;
-            }
+            $"v1.0/browser_profiles/{profileId}",
+            $"browser_profiles/{profileId}",
+            $"v1.0/browser_profiles/{profileId}/automation"
+        };
 
-            return true;
-        }
-        catch (Exception ex)
+        foreach (var path in paths)
         {
-            errors.Add($"Ошибка при stop профиля {profileId}: {ex.Message}");
-            return false;
+            try
+            {
+                using var response = await _http.GetAsync(path);
+                var raw = await response.Content.ReadAsStringAsync();
+                if (!response.IsSuccessStatusCode)
+                {
+                    errors.Add($"GET {path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
+                    continue;
+                }
+
+                var parsed = TryParseStartResponse(raw, out var parseError);
+                if (parsed is not null)
+                {
+                    errors.Add($"GET {path} -> найден endpoint запущенного профиля.");
+                    return parsed;
+                }
+
+                errors.Add($"GET {path} -> OK, но endpoint не найден: {parseError}. Body: {TrimForLog(raw)}");
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"GET {path} -> ошибка: {ex.Message}");
+            }
         }
+
+        return null;
     }
 
     private static bool IsProfileAlreadyRunningError(string raw)
@@ -528,6 +575,7 @@ internal sealed class DolphinScenario
     public string StartUrl { get; set; } = "https://www.tiktok.com/foryou";
     public DolphinConfig Dolphin { get; set; } = new();
     public AutomationConfig Automation { get; set; } = new();
+    public bool AutomationConfigured { get; set; }
 
     public static DolphinScenario CreateDefault() => new();
 }

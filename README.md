@@ -10,6 +10,7 @@
 ## Что умеет
 
 - Запуск профиля Dolphin из консоли.
+- Если настройки автоматизации не сохранены (`automationConfigured: false`) — перед запуском открывается мастер первичной настройки, затем флаг сохраняется.
 - Открытие TikTok и пауза для ручной проверки (VPN, аккаунт, лента).
 - Автоматическое листание с рандомной задержкой.
 - Плановые лайки в случайные моменты внутри периода.
@@ -42,6 +43,7 @@ dotnet run --project TTWWorker -- scenario.json
     "profileId": "",
     "apiToken": ""
   },
+  "automationConfigured": true,
   "automation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
