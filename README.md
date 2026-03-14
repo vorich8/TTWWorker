@@ -56,5 +56,5 @@ dotnet run --project TTWWorker -- scenario.json
 
 1. Если расширение/VPN работает только в основном профиле — включите `useSystemUserData: true`, `profileName: "Default"`.
 2. Если хотите полностью отдельную сессию — поставьте `useSystemUserData: false`.
-3. На старте бот открывает TikTok, вы проверяете аккаунт/VPN и нажимаете Enter.
+3. На старте бот создаёт отдельную вкладку и принудительно открывает TikTok (чтобы не оставаться на about:blank).
 4. Во время работы команды в консоли: `like`, `stop`.

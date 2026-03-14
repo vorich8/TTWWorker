@@ -209,8 +209,16 @@ internal sealed class YandexControlPanel(string configPath)
                     UserAgent = cfg.Browser.UserAgent
                 });
 
-            var page = context.Pages.FirstOrDefault() ?? await context.NewPageAsync();
-            await page.GotoAsync(cfg.StartUrl);
+            // Всегда создаём отдельную вкладку под TikTok, чтобы не оставаться на about:blank.
+            var page = await context.NewPageAsync();
+            await page.BringToFrontAsync();
+            await page.GotoAsync(cfg.StartUrl, new PageGotoOptions { WaitUntil = WaitUntilState.DOMContentLoaded });
+
+            // Если стартовая вкладка осталась пустой, закрываем её, чтобы не мешала.
+            foreach (var existing in context.Pages.Where(p => p != page && p.Url.Equals("about:blank", StringComparison.OrdinalIgnoreCase)).ToList())
+            {
+                await existing.CloseAsync();
+            }
 
             Console.WriteLine("TikTok открыт. Проверьте аккаунт/VPN и нажмите Enter для старта.");
             Console.ReadLine();
