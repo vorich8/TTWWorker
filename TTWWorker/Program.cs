@@ -91,6 +91,18 @@ internal sealed class YandexControlPanel(string configPath)
         if (!string.IsNullOrWhiteSpace(root))
             cfg.Browser.ProfilesRoot = root;
 
+        Console.Write($"Использовать системный User Data? (сейчас: {(cfg.Browser.UseSystemUserData ? "да" : "нет")}, y/n): ");
+        var useSystem = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (useSystem is "y" or "yes" or "д" or "да")
+            cfg.Browser.UseSystemUserData = true;
+        else if (useSystem is "n" or "no" or "н" or "нет")
+            cfg.Browser.UseSystemUserData = false;
+
+        Console.Write($"Системная папка User Data (сейчас: {cfg.Browser.SystemUserDataDir}): ");
+        var systemUserData = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(systemUserData))
+            cfg.Browser.SystemUserDataDir = systemUserData;
+
         Console.Write($"Имя профиля (сейчас: {cfg.Browser.ProfileName}): ");
         var profile = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(profile))
@@ -164,11 +176,23 @@ internal sealed class YandexControlPanel(string configPath)
             await SaveConfigAsync(cfg);
         }
 
-        var profileDir = Path.Combine(cfg.Browser.ProfilesRoot, cfg.Browser.ProfileName);
+        var profileDir = cfg.Browser.UseSystemUserData
+            ? cfg.Browser.SystemUserDataDir
+            : Path.Combine(cfg.Browser.ProfilesRoot, cfg.Browser.ProfileName);
+
         Directory.CreateDirectory(profileDir);
 
         Console.WriteLine("Запускаю Яндекс.Браузер в отдельном профиле...");
         Console.WriteLine($"Профиль: {profileDir}");
+        Console.WriteLine($"Profile directory: {cfg.Browser.ProfileName}");
+
+        var launchArgs = new List<string>
+        {
+            "--new-window",
+            "--no-first-run",
+            "--no-default-browser-check",
+            $"--profile-directory={cfg.Browser.ProfileName}"
+        };
 
         try
         {
@@ -181,7 +205,7 @@ internal sealed class YandexControlPanel(string configPath)
                     Headless = false,
                     Channel = null,
                     IgnoreDefaultArgs = new[] { "--enable-automation", "--disable-extensions" },
-                    Args = new[] { "--new-window", "--no-first-run", "--no-default-browser-check" },
+                    Args = launchArgs,
                     UserAgent = cfg.Browser.UserAgent
                 });
 
@@ -304,6 +328,8 @@ internal sealed class BrowserConfig
     public string ExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public string ProfilesRoot { get; set; } = "managed-profiles";
     public string ProfileName { get; set; } = "Profile 1";
+    public bool UseSystemUserData { get; set; }
+    public string SystemUserDataDir { get; set; } = @"C:\Users\Администратор\AppData\Local\Yandex\YandexBrowser\User Data";
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36";
 }
 

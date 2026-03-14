@@ -6,9 +6,11 @@
 
 - Убран режим Dolphin API (free-план не подходит для automation endpoint).
 - Бот запускает Яндекс.Браузер напрямую через `browser.exe`.
-- Используется отдельная папка профиля (`profilesRoot/profileName`), поэтому не нужно закрывать другие открытые браузеры.
+- Можно запускать в двух режимах профиля:
+  - `useSystemUserData: true` — использовать системный `User Data` + `profileName` (нужно, если расширение/VPN уже установлено в основном профиле).
+  - `useSystemUserData: false` — использовать отдельный профиль в `profilesRoot`.
 - В конфиг добавлен явный `userAgent` для стабильного входа/работы аккаунта.
-- Для установки расширений (например VPN) отключены Playwright-флаги `--enable-automation` и `--disable-extensions`, которые мешали установке в автоматизированном режиме.
+- Для установки расширений отключены Playwright-флаги `--enable-automation` и `--disable-extensions`.
 
 ## Запуск
 
@@ -32,7 +34,9 @@ dotnet run --project TTWWorker -- scenario.json
   "browser": {
     "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "profilesRoot": "managed-profiles",
-    "profileName": "Profile 1",
+    "profileName": "Default",
+    "useSystemUserData": true,
+    "systemUserDataDir": "C:/Users/Администратор/AppData/Local/Yandex/YandexBrowser/User Data",
     "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
   },
   "automation": {
@@ -50,7 +54,7 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Важно
 
-1. Укажите корректный путь к `browser.exe` Яндекс.Браузера.
-2. Настройте `userAgent` под ваш рабочий аккаунт/сессию.
-3. На старте бот открывает TikTok, вы проверяете VPN/аккаунт и нажимаете Enter.
+1. Если расширение/VPN работает только в основном профиле — включите `useSystemUserData: true`, `profileName: "Default"`.
+2. Если хотите полностью отдельную сессию — поставьте `useSystemUserData: false`.
+3. На старте бот открывает TikTok, вы проверяете аккаунт/VPN и нажимаете Enter.
 4. Во время работы команды в консоли: `like`, `stop`.

@@ -3,7 +3,9 @@
   "browser": {
     "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "profilesRoot": "managed-profiles",
-    "profileName": "Profile 1",
+    "profileName": "Default",
+    "useSystemUserData": true,
+    "systemUserDataDir": "C:/Users/Администратор/AppData/Local/Yandex/YandexBrowser/User Data",
     "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
   },
   "automation": {
