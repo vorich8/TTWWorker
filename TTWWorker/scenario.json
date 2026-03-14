@@ -2,7 +2,7 @@
   "startUrl": "https://www.tiktok.com/foryou",
   "dolphin": {
     "apiBaseUrl": "http://127.0.0.1:3001",
-    "profileId": ""
+    "profileId": "748539924"
   },
   "automation": {
     "workDurationMinutes": 60,
