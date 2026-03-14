@@ -271,20 +271,47 @@ internal sealed class YandexControlPanel(string configPath)
 
     private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string profileDir, IReadOnlyList<string> launchArgs)
     {
+        if (cfg.Browser.UseSystemUserData)
+        {
+            // Для системного User Data профиль часто уже занят основным окном браузера.
+            // Сразу используем временную копию, чтобы избежать мгновенного закрытия процесса.
+            Console.WriteLine("Используется системный User Data: запускаю через временную копию профиля...");
+            var cloneRoot = CreateProfileClone(cfg);
+
+            try
+            {
+                var clonedContext = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
+                return new LaunchResult(clonedContext, cloneRoot);
+            }
+            catch
+            {
+                TryDeleteDirectory(cloneRoot);
+                throw;
+            }
+        }
+
         try
         {
             var context = await LaunchContextAsync(playwright, cfg, profileDir, launchArgs);
             return new LaunchResult(context, null);
         }
-        catch (PlaywrightException ex) when (cfg.Browser.UseSystemUserData)
+        catch (PlaywrightException ex)
         {
-            Console.WriteLine("Основной запуск через системный User Data не удался.");
-            Console.WriteLine("Пробую временную копию профиля (без закрытия основных браузеров)...");
+            Console.WriteLine("Основной запуск не удался.");
+            Console.WriteLine("Пробую временную копию профиля...");
             Console.WriteLine($"Причина: {ex.Message}");
 
             var cloneRoot = CreateProfileClone(cfg);
-            var context = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
-            return new LaunchResult(context, cloneRoot);
+            try
+            {
+                var context = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
+                return new LaunchResult(context, cloneRoot);
+            }
+            catch
+            {
+                TryDeleteDirectory(cloneRoot);
+                throw;
+            }
         }
     }
 
