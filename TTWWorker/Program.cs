@@ -180,7 +180,7 @@ internal sealed class YandexControlPanel(string configPath)
                     ExecutablePath = cfg.Browser.ExecutablePath,
                     Headless = false,
                     Channel = null,
-                    IgnoreDefaultArgs = Array.Empty<string>(),
+                    IgnoreDefaultArgs = new[] { "--enable-automation", "--disable-extensions" },
                     Args = new[] { "--new-window", "--no-first-run", "--no-default-browser-check" },
                     UserAgent = cfg.Browser.UserAgent
                 });
