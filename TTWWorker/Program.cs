@@ -307,6 +307,9 @@ internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
         };
 
         var errors = new List<string>();
+        var sawFreePlanAutomationError = false;
+        var sawInvalidSessionToken = false;
+        var sawSuccessWithoutEndpoint = false;
 
         foreach (var attempt in attempts)
         {
@@ -316,6 +319,12 @@ internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
 
             if (!response.IsSuccessStatusCode)
             {
+                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired && raw.Contains("free plan", StringComparison.OrdinalIgnoreCase))
+                    sawFreePlanAutomationError = true;
+
+                if (raw.Contains("invalid session token", StringComparison.OrdinalIgnoreCase))
+                    sawInvalidSessionToken = true;
+
                 errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
                 continue;
             }
@@ -324,13 +333,30 @@ internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
             if (parsed is not null)
                 return parsed;
 
+            if (raw.Contains("\"success\":true", StringComparison.OrdinalIgnoreCase))
+                sawSuccessWithoutEndpoint = true;
+
             errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
         }
+
+        var hints = new List<string>();
+        if (sawFreePlanAutomationError)
+        {
+            hints.Add("Dolphin вернул 'On free plan you can't use automation' — профиль может открываться, но CDP endpoint для Playwright не выдаётся на free-плане.");
+            hints.Add("Варианты: подключить платный тариф с automation API или перейти на локальный браузерный режим без Dolphin API automation.");
+        }
+
+        if (sawInvalidSessionToken)
+            hints.Add("Есть ответы 'invalid session token' — для части endpoint нужен валидный session token/авторизация в локальном API Dolphin.");
+
+        if (sawSuccessWithoutEndpoint)
+            hints.Add("API сообщил success=true, но не вернул ws/port. Это означает: профиль запустился, но к автоматизации подключиться нельзя без automation endpoint.");
 
         throw new InvalidOperationException(
             "Не удалось запустить профиль через Dolphin API. " +
             "Проверьте корректность profileId и доступность локального API. Попытки:\n" +
-            string.Join("\n", errors));
+            string.Join("\n", errors) +
+            (hints.Count > 0 ? "\n\nЧто это значит:\n- " + string.Join("\n- ", hints) : string.Empty));
     }
 
     public async Task StopProfileAsync(string profileId)
