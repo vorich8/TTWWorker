@@ -1,18 +1,16 @@
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "browserExecutablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
-  "launchMode": "PlaywrightPersistent",
-  "cdpPort": 9222,
-  "defaultAutomation": {
+  "dolphin": {
+    "apiBaseUrl": "http://127.0.0.1:3001",
+    "profileId": ""
+  },
+  "automation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
     "scrollDelayMaxSeconds": 12,
-    "scrollActionType": "keyPress",
     "scrollKey": "ArrowDown",
-    "scrollSelector": "",
     "likesPerPeriod": 2,
     "likePeriodMinutes": 10,
     "likeKey": "KeyL"
-  },
-  "enableModeFallback": false
+  }
 }
