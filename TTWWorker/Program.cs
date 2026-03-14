@@ -103,6 +103,13 @@ internal sealed class YandexControlPanel(string configPath)
         if (!string.IsNullOrWhiteSpace(systemUserData))
             cfg.Browser.SystemUserDataDir = systemUserData;
 
+        Console.Write($"Режим основного браузера (без Playwright/CDP)? (сейчас: {(cfg.Browser.UseMainBrowserInputMode ? "да" : "нет")}, y/n): ");
+        var mainMode = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (mainMode is "y" or "yes" or "д" or "да")
+            cfg.Browser.UseMainBrowserInputMode = true;
+        else if (mainMode is "n" or "no" or "н" or "нет")
+            cfg.Browser.UseMainBrowserInputMode = false;
+
         Console.Write($"Имя профиля (сейчас: {cfg.Browser.ProfileName}): ");
         var profile = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(profile))
@@ -161,6 +168,12 @@ internal sealed class YandexControlPanel(string configPath)
     private async Task RunAutomationAsync()
     {
         var cfg = LoadConfig();
+
+        if (cfg.Browser.UseMainBrowserInputMode)
+        {
+            await RunMainBrowserInputModeAsync(cfg);
+            return;
+        }
 
         if (!File.Exists(cfg.Browser.ExecutablePath))
         {
@@ -267,6 +280,85 @@ internal sealed class YandexControlPanel(string configPath)
         {
             Console.WriteLine("Ошибка запуска автоматизации:");
             Console.WriteLine(ex.Message);
+        }
+    }
+
+    private async Task RunMainBrowserInputModeAsync(AppConfig cfg)
+    {
+        Console.WriteLine("Режим: основной браузер (без Playwright/CDP).\n");
+        Console.WriteLine("Откройте TikTok в основном браузере, сделайте окно активным и нажмите Enter.");
+        Console.ReadLine();
+
+        var queue = new ConcurrentQueue<string>();
+        using var cts = new CancellationTokenSource();
+        _ = Task.Run(() => ReadCommands(queue, cts.Token), cts.Token);
+
+        var likes = new LikeScheduleState(DateTime.UtcNow, cfg.Automation);
+        var startedAt = DateTime.UtcNow;
+
+        Console.WriteLine("Автоматизация запущена в основном браузере. Команды: like | stop");
+
+        while (!cts.IsCancellationRequested)
+        {
+            cfg = LoadConfig();
+            if (DateTime.UtcNow >= startedAt.AddMinutes(Math.Max(1, cfg.Automation.WorkDurationMinutes)))
+            {
+                Console.WriteLine("Время работы вышло.");
+                break;
+            }
+
+            ProcessCommandsNative(cfg.Automation, queue, cts);
+            ProcessLikesNative(cfg.Automation, likes);
+
+            var delaySec = Random.Shared.Next(
+                Math.Max(1, cfg.Automation.ScrollDelayMinSeconds),
+                Math.Max(cfg.Automation.ScrollDelayMinSeconds, cfg.Automation.ScrollDelayMaxSeconds) + 1);
+
+            Console.WriteLine($"Ожидание {delaySec} сек...");
+            await Task.Delay(delaySec * 1000, cts.Token).ContinueWith(_ => { });
+
+            ProcessCommandsNative(cfg.Automation, queue, cts);
+            ProcessLikesNative(cfg.Automation, likes);
+            if (cts.IsCancellationRequested)
+                break;
+
+            NativeKeyboard.Press(cfg.Automation.ScrollKey);
+            Console.WriteLine($"Листание (основной браузер): {cfg.Automation.ScrollKey}");
+        }
+    }
+
+    private static void ProcessCommandsNative(AutomationConfig cfg, ConcurrentQueue<string> queue, CancellationTokenSource cts)
+    {
+        while (queue.TryDequeue(out var cmd))
+        {
+            switch (cmd)
+            {
+                case "like":
+                    NativeKeyboard.Press(cfg.LikeKey);
+                    Console.WriteLine($"Команда like: {cfg.LikeKey}");
+                    break;
+                case "stop":
+                    cts.Cancel();
+                    break;
+                default:
+                    Console.WriteLine($"Неизвестная команда: {cmd}");
+                    break;
+            }
+        }
+    }
+
+    private static void ProcessLikesNative(AutomationConfig cfg, LikeScheduleState state)
+    {
+        if (cfg.LikesPerPeriod <= 0)
+            return;
+
+        if (DateTime.UtcNow >= state.PeriodEndUtc)
+            state.Reset(cfg);
+
+        while (state.TryDequeueDueLike(DateTime.UtcNow, out _))
+        {
+            NativeKeyboard.Press(cfg.LikeKey);
+            Console.WriteLine($"Плановый лайк: {cfg.LikeKey}");
         }
     }
 
@@ -451,8 +543,44 @@ internal sealed class BrowserConfig
     public string ProfilesRoot { get; set; } = "managed-profiles";
     public string ProfileName { get; set; } = "Profile 1";
     public bool UseSystemUserData { get; set; }
+    public bool UseMainBrowserInputMode { get; set; } = true;
     public string SystemUserDataDir { get; set; } = @"C:\Users\Администратор\AppData\Local\Yandex\YandexBrowser\User Data";
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36";
+}
+
+internal static class NativeKeyboard
+{
+    private const uint KeyUpFlag = 0x0002;
+
+    public static void Press(string key)
+    {
+        var vk = ResolveVirtualKey(key);
+        if (vk is null)
+            return;
+
+        keybd_event((byte)vk.Value, 0, 0, 0);
+        keybd_event((byte)vk.Value, 0, KeyUpFlag, 0);
+    }
+
+    private static ushort? ResolveVirtualKey(string key)
+    {
+        if (string.IsNullOrWhiteSpace(key))
+            return null;
+
+        return key.Trim().ToLowerInvariant() switch
+        {
+            "arrowdown" => 0x28,
+            "arrowup" => 0x26,
+            "arrowleft" => 0x25,
+            "arrowright" => 0x27,
+            "keyl" => 0x4C,
+            "l" => 0x4C,
+            _ => null
+        };
+    }
+
+    [System.Runtime.InteropServices.DllImport("user32.dll", SetLastError = true)]
+    private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, int dwExtraInfo);
 }
 
 internal sealed class AutomationConfig

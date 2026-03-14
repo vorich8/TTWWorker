@@ -1,17 +1,26 @@
 # TTWWorker
 
-Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright** (без Dolphin).
+Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright**.
 
-## Что изменено
+## Важное обновление
 
-- Убран режим Dolphin API (free-план не подходит для automation endpoint).
-- Бот запускает Яндекс.Браузер напрямую через `browser.exe`.
-- Можно запускать в двух режимах профиля:
-  - `useSystemUserData: true` — брать данные из системного `User Data` + `profileName`, но запускать браузер через временный клон профиля (чтобы не конфликтовать с уже открытым основным браузером).
-  - `useSystemUserData: false` — использовать отдельный профиль в `profilesRoot` (бот запускает `userDataDir=profilesRoot` и `--profile-directory=<profileName>`).
-- В конфиг добавлен явный `userAgent` для стабильного входа/работы аккаунта.
-- Для установки расширений отключены Playwright-флаги `--enable-automation` и `--disable-extensions`.
-- В режиме `useSystemUserData: true` бот сразу запускается через временную копию выбранного профиля, чтобы не ловить падение при занятом системном профиле.
+Добавлен режим **основного браузера** (по умолчанию):
+- `browser.useMainBrowserInputMode: true`
+- бот НЕ запускает новый браузерный процесс;
+- вы вручную открываете TikTok в основном браузере;
+- бот отправляет нажатия клавиш (листание/лайк) в активное окно.
+
+Это сделано как fallback, когда запуск отдельного автоматизированного окна нестабилен.
+
+## Режимы работы
+
+1. **Основной браузер (рекомендуется сейчас)**
+   - `useMainBrowserInputMode: true`
+   - работает прямо в уже открытом браузере.
+
+2. **Playwright persistent**
+   - `useMainBrowserInputMode: false`
+   - бот запускает `browser.exe` сам (с системным User Data или отдельным профилем).
 
 ## Запуск
 
@@ -37,6 +46,7 @@ dotnet run --project TTWWorker -- scenario.json
     "profilesRoot": "managed-profiles",
     "profileName": "Default",
     "useSystemUserData": true,
+    "useMainBrowserInputMode": true,
     "systemUserDataDir": "C:/Users/Администратор/AppData/Local/Yandex/YandexBrowser/User Data",
     "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
   },
@@ -55,7 +65,6 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Важно
 
-1. Если расширение/VPN работает только в основном профиле — включите `useSystemUserData: true`, `profileName: "Default"`.
-2. Если хотите полностью отдельную сессию — поставьте `useSystemUserData: false`.
-3. На старте бот создаёт отдельную вкладку и принудительно открывает TikTok (чтобы не оставаться на about:blank).
-4. Во время работы команды в консоли: `like`, `stop`.
+1. Для режима основного браузера держите окно TikTok активным (в фокусе).
+2. Во время работы доступны команды: `like`, `stop`.
+3. Если нужна старая схема отдельного окна — отключите `useMainBrowserInputMode`.
