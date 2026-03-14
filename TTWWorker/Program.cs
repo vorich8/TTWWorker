@@ -197,17 +197,8 @@ internal sealed class YandexControlPanel(string configPath)
         try
         {
             using var playwright = await Playwright.CreateAsync();
-            var context = await playwright.Chromium.LaunchPersistentContextAsync(
-                userDataDir: profileDir,
-                new BrowserTypeLaunchPersistentContextOptions
-                {
-                    ExecutablePath = cfg.Browser.ExecutablePath,
-                    Headless = false,
-                    Channel = null,
-                    IgnoreDefaultArgs = new[] { "--enable-automation", "--disable-extensions" },
-                    Args = launchArgs,
-                    UserAgent = cfg.Browser.UserAgent
-                });
+            var launch = await LaunchContextWithFallbackAsync(playwright, cfg, profileDir, launchArgs);
+            var context = launch.Context;
 
             // Всегда создаём отдельную вкладку под TikTok, чтобы не оставаться на about:blank.
             var page = await context.NewPageAsync();
@@ -262,6 +253,9 @@ internal sealed class YandexControlPanel(string configPath)
 
             cts.Cancel();
             await context.CloseAsync();
+
+            if (!string.IsNullOrWhiteSpace(launch.TempClonePath))
+                TryDeleteDirectory(launch.TempClonePath);
         }
         catch (PlaywrightException ex)
         {
@@ -272,6 +266,96 @@ internal sealed class YandexControlPanel(string configPath)
         {
             Console.WriteLine("Ошибка запуска автоматизации:");
             Console.WriteLine(ex.Message);
+        }
+    }
+
+    private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string profileDir, IReadOnlyList<string> launchArgs)
+    {
+        try
+        {
+            var context = await LaunchContextAsync(playwright, cfg, profileDir, launchArgs);
+            return new LaunchResult(context, null);
+        }
+        catch (PlaywrightException ex) when (cfg.Browser.UseSystemUserData)
+        {
+            Console.WriteLine("Основной запуск через системный User Data не удался.");
+            Console.WriteLine("Пробую временную копию профиля (без закрытия основных браузеров)...");
+            Console.WriteLine($"Причина: {ex.Message}");
+
+            var cloneRoot = CreateProfileClone(cfg);
+            var context = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
+            return new LaunchResult(context, cloneRoot);
+        }
+    }
+
+    private async Task<IBrowserContext> LaunchContextAsync(IPlaywright playwright, AppConfig cfg, string userDataDir, IReadOnlyList<string> launchArgs)
+    {
+        return await playwright.Chromium.LaunchPersistentContextAsync(
+            userDataDir: userDataDir,
+            new BrowserTypeLaunchPersistentContextOptions
+            {
+                ExecutablePath = cfg.Browser.ExecutablePath,
+                Headless = false,
+                Channel = null,
+                IgnoreDefaultArgs = new[] { "--enable-automation", "--disable-extensions" },
+                Args = launchArgs,
+                UserAgent = cfg.Browser.UserAgent
+            });
+    }
+
+    private string CreateProfileClone(AppConfig cfg)
+    {
+        var cloneRoot = Path.Combine(cfg.Browser.ProfilesRoot, "runtime-clones", $"clone-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(cloneRoot);
+
+        var sourceProfileDir = Path.Combine(cfg.Browser.SystemUserDataDir, cfg.Browser.ProfileName);
+        var targetProfileDir = Path.Combine(cloneRoot, cfg.Browser.ProfileName);
+        CopyDirectory(sourceProfileDir, targetProfileDir);
+
+        var localState = Path.Combine(cfg.Browser.SystemUserDataDir, "Local State");
+        if (File.Exists(localState))
+            File.Copy(localState, Path.Combine(cloneRoot, "Local State"), overwrite: true);
+
+        return cloneRoot;
+    }
+
+    private static void CopyDirectory(string source, string target)
+    {
+        if (!Directory.Exists(source))
+            return;
+
+        Directory.CreateDirectory(target);
+
+        foreach (var file in Directory.EnumerateFiles(source))
+        {
+            var name = Path.GetFileName(file);
+            if (name.Contains("lock", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            var dest = Path.Combine(target, name);
+            File.Copy(file, dest, overwrite: true);
+        }
+
+        foreach (var dir in Directory.EnumerateDirectories(source))
+        {
+            var name = Path.GetFileName(dir);
+            if (name.Contains("Crashpad", StringComparison.OrdinalIgnoreCase))
+                continue;
+
+            CopyDirectory(dir, Path.Combine(target, name));
+        }
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+            // ignore cleanup issues
         }
     }
 
@@ -320,6 +404,8 @@ internal sealed class YandexControlPanel(string configPath)
         }
     }
 }
+
+internal sealed record LaunchResult(IBrowserContext Context, string? TempClonePath);
 
 internal sealed class AppConfig
 {
