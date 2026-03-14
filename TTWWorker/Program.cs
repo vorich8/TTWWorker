@@ -412,7 +412,7 @@ internal sealed class DolphinClient : IDisposable
             errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
         }
 
-        if (sawAlreadyRunning)
+        if (sawAlreadyRunning || sawSuccessWithoutEndpoint || sawFreePlanAutomationError)
         {
             var existing = await TryAttachToRunningProfileAsync(profileId, errors);
             if (existing is not null)
@@ -428,6 +428,9 @@ internal sealed class DolphinClient : IDisposable
 
         if (sawAlreadyRunning)
             hints.Add("Профиль уже был запущен вручную. Приложение попыталось получить endpoint уже запущенного профиля без его остановки.");
+
+        if ((sawSuccessWithoutEndpoint || sawFreePlanAutomationError) && !sawAlreadyRunning)
+            hints.Add("Приложение дополнительно пыталось получить endpoint через info/automation endpoint уже после старта профиля.");
 
         if (sawInvalidSessionToken)
             hints.Add("Есть ответы 'invalid session token' — проверьте `dolphin.apiToken` в scenario.json и повторите запуск.");
@@ -538,6 +541,12 @@ internal sealed class DolphinClient : IDisposable
                 ?? TryGetInt(root, "automationPort");
 
             if (string.IsNullOrWhiteSpace(autoWs) && string.IsNullOrWhiteSpace(ws) && port is null)
+                TryExtractEndpointDeep(root, out ws, out port);
+
+            if (string.IsNullOrWhiteSpace(autoWs))
+                autoWs = ws;
+
+            if (string.IsNullOrWhiteSpace(autoWs) && string.IsNullOrWhiteSpace(ws) && port is null)
             {
                 parseError = "в ответе нет ws endpoint и порта";
                 return null;
@@ -555,6 +564,100 @@ internal sealed class DolphinClient : IDisposable
             parseError = ex.Message;
             return null;
         }
+    }
+
+    private static void TryExtractEndpointDeep(JsonElement node, out string? wsEndpoint, out int? port)
+    {
+        wsEndpoint = null;
+        port = null;
+        ExtractRecursive(node, ref wsEndpoint, ref port);
+    }
+
+    private static void ExtractRecursive(JsonElement node, ref string? wsEndpoint, ref int? port)
+    {
+        if (!string.IsNullOrWhiteSpace(wsEndpoint) && port is not null)
+            return;
+
+        switch (node.ValueKind)
+        {
+            case JsonValueKind.Object:
+                foreach (var prop in node.EnumerateObject())
+                {
+                    var name = prop.Name;
+                    var val = prop.Value;
+
+                    if (val.ValueKind == JsonValueKind.String)
+                    {
+                        var s = val.GetString();
+                        if (!string.IsNullOrWhiteSpace(s))
+                        {
+                            if (IsWsLikeString(s) && string.IsNullOrWhiteSpace(wsEndpoint))
+                                wsEndpoint = s;
+
+                            if (port is null && TryParsePortFromString(s, out var parsedPort))
+                                port = parsedPort;
+                        }
+                    }
+                    else if (val.ValueKind == JsonValueKind.Number && port is null
+                             && name.Contains("port", StringComparison.OrdinalIgnoreCase)
+                             && val.TryGetInt32(out var p))
+                    {
+                        port = p;
+                    }
+
+                    ExtractRecursive(val, ref wsEndpoint, ref port);
+                }
+                break;
+
+            case JsonValueKind.Array:
+                foreach (var item in node.EnumerateArray())
+                    ExtractRecursive(item, ref wsEndpoint, ref port);
+                break;
+
+            case JsonValueKind.String:
+                var str = node.GetString();
+                if (!string.IsNullOrWhiteSpace(str))
+                {
+                    if (IsWsLikeString(str) && string.IsNullOrWhiteSpace(wsEndpoint))
+                        wsEndpoint = str;
+
+                    if (port is null && TryParsePortFromString(str, out var parsedPort))
+                        port = parsedPort;
+                }
+                break;
+        }
+    }
+
+    private static bool IsWsLikeString(string value)
+    {
+        return value.Contains("ws://", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("wss://", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("/devtools/browser/", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("127.0.0.1:", StringComparison.OrdinalIgnoreCase)
+               || value.Contains("localhost:", StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool TryParsePortFromString(string value, out int port)
+    {
+        port = 0;
+
+        if (Uri.TryCreate(value, UriKind.Absolute, out var uri) && uri.Port > 0)
+        {
+            port = uri.Port;
+            return true;
+        }
+
+        var chunks = value.Split(':', '/', '?', ' ', '\t', '\r', '\n', StringSplitOptions.RemoveEmptyEntries);
+        foreach (var chunk in chunks.Reverse())
+        {
+            if (int.TryParse(chunk, out var parsed) && parsed is > 0 and <= 65535)
+            {
+                port = parsed;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static string TrimForLog(string value)
