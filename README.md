@@ -1,23 +1,13 @@
 # TTWWorker
 
-Консольная автоматизация TikTok через **Dolphin Anty** + Playwright.
+Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright** (без Dolphin).
 
-Теперь проект полностью опирается на Dolphin:
-- запуск/остановка профиля делается через локальный API Dolphin;
-- подключение к браузеру делается по CDP endpoint, который возвращает сам Dolphin;
-- не нужно вручную поднимать CDP-порт и не нужно закрывать основной браузер.
+## Что изменено
 
-## Что умеет
-
-- Запуск профиля Dolphin из консоли.
-- Если настройки автоматизации не сохранены (`automationConfigured: false`) — перед запуском открывается мастер первичной настройки, затем флаг сохраняется.
-- Открытие TikTok и пауза для ручной проверки (VPN, аккаунт, лента).
-- Автоматическое листание с рандомной задержкой.
-- Плановые лайки в случайные моменты внутри периода.
-- Команды во время работы:
-  - `like` — лайк сразу;
-  - `stop` — остановить автоматизацию.
-- Постоянный рескан `scenario.json` во время цикла (можно править на лету).
+- Убран режим Dolphin API (free-план не подходит для automation endpoint).
+- Бот запускает Яндекс.Браузер напрямую через `browser.exe`.
+- Используется отдельная папка профиля (`profilesRoot/profileName`), поэтому не нужно закрывать другие открытые браузеры.
+- В конфиг добавлен явный `userAgent` для стабильного входа/работы аккаунта.
 
 ## Запуск
 
@@ -28,22 +18,22 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Пункт управления
 
-- `1` — запустить автоматизацию профиля Dolphin
+- `1` — запустить автоматизацию
 - `2` — настроить `scenario.json`
 - `3` — показать текущий JSON
 - `0` — выход
 
-## Настройка `scenario.json`
+## Пример `scenario.json`
 
 ```json
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "dolphin": {
-    "apiBaseUrl": "http://127.0.0.1:3001",
-    "profileId": "",
-    "apiToken": ""
+  "browser": {
+    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+    "profilesRoot": "managed-profiles",
+    "profileName": "Profile 1",
+    "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
   },
-  "automationConfigured": true,
   "automation": {
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
@@ -52,13 +42,14 @@ dotnet run --project TTWWorker -- scenario.json
     "likesPerPeriod": 2,
     "likePeriodMinutes": 10,
     "likeKey": "KeyL"
-  }
+  },
+  "automationConfigured": true
 }
 ```
 
-### Важно
+## Важно
 
-1. В `dolphin.profileId` укажите ID профиля из Dolphin Anty.
-2. Добавьте `dolphin.apiToken` (JWT токен Dolphin API), иначе часть endpoint может отвечать `401 invalid session token`.
-3. Локальный API Dolphin должен быть доступен по `apiBaseUrl`.
-4. Если API отвечает нестандартным JSON, подскажи пример ответа — быстро подгоню парсер под твою версию.
+1. Укажите корректный путь к `browser.exe` Яндекс.Браузера.
+2. Настройте `userAgent` под ваш рабочий аккаунт/сессию.
+3. На старте бот открывает TikTok, вы проверяете VPN/аккаунт и нажимаете Enter.
+4. Во время работы команды в консоли: `like`, `stop`.

@@ -1,9 +1,10 @@
 {
   "startUrl": "https://www.tiktok.com/foryou",
-  "dolphin": {
-    "apiBaseUrl": "http://127.0.0.1:3001",
-    "profileId": "748539924",
-    "apiToken": "eyJ0eXAiOiJKV1QiLCJhbGciOiJSUzI1NiJ9.eyJhdWQiOiIxIiwianRpIjoiYTQ0ZDdjZjg1NGI3MzhhNzUwNWY1MWRlNzIyZGJlNTY0MDAwNmIwN2FmM2RlZTVmODc4MzQxNzU4ZGVkOTk3ZGI2YjEwODVjNWZmYjA4ODMiLCJpYXQiOjE3NzM0ODIyOTAuMDAwNjY0LCJuYmYiOjE3NzM0ODIyOTAuMDAwNjY3LCJleHAiOjE3NzYwNzQyODkuOTkxNzMzLCJzdWIiOiI0OTczNDIyIiwic2NvcGVzIjpbXSwidGVhbV9pZCI6NDg3MjQ1MSwidGVhbV9wbGFuIjoiZnJlZSIsInRlYW1fcGxhbl9leHBpcmF0aW9uIjoxNzcxOTM3NjI5fQ.KawSvY6U3mAUZ97KUjX7bEjPtXiZI_QYpmZ9Cqg0t5IsMR3BSo92mxgS4a3IglntcD12H7k_RzfBGl6zzZg7sHl9rni8GM2vB81-K7-HZNjYtnauKmOXqbv4zndMXr0D2rvvOQQDIblZb3WRtUFLGGd2dBGJEauagXQT1wzswuo4nwXrNtpJtf2gDCZJGFDNH4u7YuCOffjveCI0DgzuhuEOPljMzyt5BxEDwT9g_13zpciVqg63P6DzGxg9nuimCni6xACEsi1AtAfcvY1-0N2-LP0uTstEAEHBkXK3QUX5wIJHY4nY6pSS82bJh30o3mZwmgrMqZlbWd_kTDx4PypCMX1W2H5DkvCdXCtdFrTDLLgsm_61EAaOpnpUtf6ZIa-BzTt-pwDgDnQdCrSN3J2AuBbymmJlpjtazy1BC69-cndGx5whcCO9PzJ1fS-zIR486SHj7bRjShjeuG536yJOuY1d1Ey1E2srYHedD9NCAJ_G2yLYH135gB1UoplzibkOzvuA-Im4f8L8NTLbxfGMA_EkCQx1EmnYwdCagedUhp58qHJqmq8WsY9Q64RirTwGyOpNjT47VhrFC914ZlVUglBwEW4TjZV36-oMIbNeJphZgNe_5G4lVYWjuKWFZrfAZRtFfRTPJM5Lx6En0Kr7JxCgycBouktRnETIgko"
+  "browser": {
+    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+    "profilesRoot": "managed-profiles",
+    "profileName": "Profile 1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36"
   },
   "automation": {
     "workDurationMinutes": 60,
