@@ -339,33 +339,55 @@ internal sealed class DolphinClient : IDisposable
         var sawFreePlanAutomationError = false;
         var sawInvalidSessionToken = false;
         var sawSuccessWithoutEndpoint = false;
+        var sawAlreadyRunning = false;
 
-        foreach (var attempt in attempts)
+        for (var cycle = 0; cycle < 2; cycle++)
         {
-            using var request = new HttpRequestMessage(attempt.Method, attempt.Path);
-            using var response = await _http.SendAsync(request);
-            var raw = await response.Content.ReadAsStringAsync();
+            var cycleSawAlreadyRunning = false;
 
-            if (!response.IsSuccessStatusCode)
+            foreach (var attempt in attempts)
             {
-                if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired && raw.Contains("free plan", StringComparison.OrdinalIgnoreCase))
-                    sawFreePlanAutomationError = true;
+                using var request = new HttpRequestMessage(attempt.Method, attempt.Path);
+                using var response = await _http.SendAsync(request);
+                var raw = await response.Content.ReadAsStringAsync();
 
-                if (raw.Contains("invalid session token", StringComparison.OrdinalIgnoreCase))
-                    sawInvalidSessionToken = true;
+                if (!response.IsSuccessStatusCode)
+                {
+                    if (response.StatusCode == System.Net.HttpStatusCode.PaymentRequired && raw.Contains("free plan", StringComparison.OrdinalIgnoreCase))
+                        sawFreePlanAutomationError = true;
 
-                errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
-                continue;
+                    if (raw.Contains("invalid session token", StringComparison.OrdinalIgnoreCase))
+                        sawInvalidSessionToken = true;
+
+                    if (IsProfileAlreadyRunningError(raw))
+                    {
+                        sawAlreadyRunning = true;
+                        cycleSawAlreadyRunning = true;
+                    }
+
+                    errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
+                    continue;
+                }
+
+                var parsed = TryParseStartResponse(raw, out var parseError);
+                if (parsed is not null)
+                    return parsed;
+
+                if (raw.Contains("\"success\":true", StringComparison.OrdinalIgnoreCase))
+                    sawSuccessWithoutEndpoint = true;
+
+                errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
             }
 
-            var parsed = TryParseStartResponse(raw, out var parseError);
-            if (parsed is not null)
-                return parsed;
+            if (!cycleSawAlreadyRunning || cycle > 0)
+                break;
 
-            if (raw.Contains("\"success\":true", StringComparison.OrdinalIgnoreCase))
-                sawSuccessWithoutEndpoint = true;
+            var stopped = await TryStopProfileIgnoringErrors(profileId, errors);
+            if (!stopped)
+                break;
 
-            errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
+            errors.Add("Обнаружено, что профиль уже запущен. Выполнен stop и повторная попытка start...");
+            await Task.Delay(1200);
         }
 
         var hints = new List<string>();
@@ -375,8 +397,11 @@ internal sealed class DolphinClient : IDisposable
             hints.Add("Варианты: подключить платный тариф с automation API или перейти на локальный браузерный режим без Dolphin API automation.");
         }
 
+        if (sawAlreadyRunning)
+            hints.Add("Профиль уже был запущен. Приложение попыталось перезапустить его автоматически (stop + start). Если ошибка осталась — закройте профиль вручную в Dolphin и повторите.");
+
         if (sawInvalidSessionToken)
-            hints.Add("Есть ответы 'invalid session token' — для части endpoint нужен валидный session token/авторизация в локальном API Dolphin.");
+            hints.Add("Есть ответы 'invalid session token' — проверьте `dolphin.apiToken` в scenario.json и повторите запуск.");
 
         if (sawSuccessWithoutEndpoint)
             hints.Add("API сообщил success=true, но не вернул ws/port. Это означает: профиль запустился, но к автоматизации подключиться нельзя без automation endpoint.");
@@ -386,6 +411,37 @@ internal sealed class DolphinClient : IDisposable
             "Проверьте корректность profileId и доступность локального API. Попытки:\n" +
             string.Join("\n", errors) +
             (hints.Count > 0 ? "\n\nЧто это значит:\n- " + string.Join("\n- ", hints) : string.Empty));
+    }
+
+    private async Task<bool> TryStopProfileIgnoringErrors(string profileId, List<string> errors)
+    {
+        try
+        {
+            using var response = await _http.GetAsync($"v1.0/browser_profiles/{profileId}/stop");
+            var raw = await response.Content.ReadAsStringAsync();
+            if (!response.IsSuccessStatusCode)
+            {
+                errors.Add($"GET v1.0/browser_profiles/{profileId}/stop -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
+                return false;
+            }
+
+            return true;
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Ошибка при stop профиля {profileId}: {ex.Message}");
+            return false;
+        }
+    }
+
+    private static bool IsProfileAlreadyRunningError(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+            return false;
+
+        return raw.Contains("E_BROWSER_RUN_DUPLICATE", StringComparison.OrdinalIgnoreCase)
+               || raw.Contains("already running", StringComparison.OrdinalIgnoreCase)
+               || raw.Contains("уже запущ", StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task StopProfileAsync(string profileId)
