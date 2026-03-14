@@ -1,5 +1,4 @@
 using System.Collections.Concurrent;
-using System.Net.Http.Json;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Playwright;
@@ -197,6 +196,11 @@ internal sealed class DolphinControlPanel(string configPath)
             Console.WriteLine("Ошибка HTTP при работе с Dolphin API:");
             Console.WriteLine(ex.Message);
         }
+        catch (InvalidOperationException ex)
+        {
+            Console.WriteLine("Ошибка запуска Dolphin профиля:");
+            Console.WriteLine(ex.Message);
+        }
         finally
         {
             if (start is not null)
@@ -294,24 +298,39 @@ internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
 
     public async Task<DolphinStartResponse?> StartProfileAsync(string profileId)
     {
-        // Compatible with common local API shapes
-        var response = await _http.GetAsync($"v1.0/browser_profiles/{profileId}/start?automation=1");
-        response.EnsureSuccessStatusCode();
-
-        var raw = await response.Content.ReadAsStringAsync();
-        using var doc = JsonDocument.Parse(raw);
-
-        var root = doc.RootElement;
-        var data = root.TryGetProperty("automation", out var automation)
-            ? automation
-            : root.TryGetProperty("data", out var dataNode) ? dataNode : root;
-
-        return new DolphinStartResponse
+        var attempts = new (HttpMethod Method, string Path)[]
         {
-            Port = TryGetInt(data, "port") ?? TryGetInt(root, "port"),
-            WsEndpoint = TryGetString(data, "wsEndpoint") ?? TryGetString(data, "ws_endpoint") ?? TryGetString(root, "wsEndpoint"),
-            AutomationWsEndpoint = TryGetString(data, "automationWsEndpoint") ?? TryGetString(data, "wsEndpoint")
+            (HttpMethod.Get, $"v1.0/browser_profiles/{profileId}/start?automation=1"),
+            (HttpMethod.Get, $"browser_profiles/{profileId}/start?automation=1"),
+            (HttpMethod.Post, $"v1.0/browser_profiles/{profileId}/start?automation=1"),
+            (HttpMethod.Post, $"browser_profiles/{profileId}/start?automation=1")
         };
+
+        var errors = new List<string>();
+
+        foreach (var attempt in attempts)
+        {
+            using var request = new HttpRequestMessage(attempt.Method, attempt.Path);
+            using var response = await _http.SendAsync(request);
+            var raw = await response.Content.ReadAsStringAsync();
+
+            if (!response.IsSuccessStatusCode)
+            {
+                errors.Add($"{attempt.Method} {attempt.Path} -> {(int)response.StatusCode} {response.StatusCode}. Body: {TrimForLog(raw)}");
+                continue;
+            }
+
+            var parsed = TryParseStartResponse(raw, out var parseError);
+            if (parsed is not null)
+                return parsed;
+
+            errors.Add($"{attempt.Method} {attempt.Path} -> OK, но не удалось разобрать ответ API: {parseError}. Body: {TrimForLog(raw)}");
+        }
+
+        throw new InvalidOperationException(
+            "Не удалось запустить профиль через Dolphin API. " +
+            "Проверьте корректность profileId и доступность локального API. Попытки:\n" +
+            string.Join("\n", errors));
     }
 
     public async Task StopProfileAsync(string profileId)
@@ -332,6 +351,62 @@ internal sealed class DolphinClient(string apiBaseUrl) : IDisposable
     {
         if (!e.TryGetProperty(name, out var v)) return null;
         return v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+    }
+
+    private static DolphinStartResponse? TryParseStartResponse(string raw, out string? parseError)
+    {
+        parseError = null;
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            var root = doc.RootElement;
+            var data = root.TryGetProperty("automation", out var automation)
+                ? automation
+                : root.TryGetProperty("data", out var dataNode) ? dataNode : root;
+
+            var ws = TryGetString(data, "wsEndpoint")
+                ?? TryGetString(data, "ws_endpoint")
+                ?? TryGetString(data, "browserWSEndpoint")
+                ?? TryGetString(root, "wsEndpoint")
+                ?? TryGetString(root, "browserWSEndpoint");
+
+            var autoWs = TryGetString(data, "automationWsEndpoint")
+                ?? TryGetString(data, "automation_ws_endpoint")
+                ?? ws;
+
+            var port = TryGetInt(data, "port")
+                ?? TryGetInt(root, "port")
+                ?? TryGetInt(data, "automationPort")
+                ?? TryGetInt(root, "automationPort");
+
+            if (string.IsNullOrWhiteSpace(autoWs) && string.IsNullOrWhiteSpace(ws) && port is null)
+            {
+                parseError = "в ответе нет ws endpoint и порта";
+                return null;
+            }
+
+            return new DolphinStartResponse
+            {
+                Port = port,
+                WsEndpoint = ws,
+                AutomationWsEndpoint = autoWs
+            };
+        }
+        catch (JsonException ex)
+        {
+            parseError = ex.Message;
+            return null;
+        }
+    }
+
+    private static string TrimForLog(string value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return "<empty>";
+
+        const int max = 500;
+        var singleLine = value.Replace("\r", " ").Replace("\n", " ").Trim();
+        return singleLine.Length <= max ? singleLine : singleLine[..max] + "...";
     }
 
     public void Dispose() => _http.Dispose();
