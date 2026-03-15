@@ -106,7 +106,11 @@ internal sealed class YandexControlPanel(string configPath)
         if (!string.IsNullOrWhiteSpace(url))
             cfg.StartUrl = url;
 
-        PromptAutomation(cfg.Automation);
+        var profileAutomation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
+        Console.WriteLine($"Настройка действий для профиля: {cfg.Browser.ProfileName}");
+        PromptAutomation(profileAutomation);
+        SaveProfileAutomation(cfg, cfg.Browser.ProfileName, profileAutomation);
+        cfg.Automation = profileAutomation;
 
         cfg.AutomationConfigured = true;
         await SaveConfigAsync(cfg);
@@ -135,15 +139,33 @@ internal sealed class YandexControlPanel(string configPath)
         if (int.TryParse(Console.ReadLine(), out var period) && period > 0)
             automation.LikePeriodMinutes = period;
 
-        Console.Write($"Клавиша листания (сейчас: {automation.ScrollKey}): ");
-        var scrollKey = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(scrollKey))
-            automation.ScrollKey = scrollKey;
+        Console.Write($"Селектор кнопки листания вниз (сейчас: {automation.ScrollSelector}): ");
+        var scrollSelector = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(scrollSelector))
+            automation.ScrollSelector = scrollSelector;
+
+        Console.Write($"Селектор кнопки лайка (сейчас: {automation.LikeButtonSelector}): ");
+        var likeSelector = Console.ReadLine()?.Trim();
+        if (!string.IsNullOrWhiteSpace(likeSelector))
+            automation.LikeButtonSelector = likeSelector;
 
         Console.Write($"Клавиша лайка (сейчас: {automation.LikeKey}): ");
         var likeKey = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(likeKey))
             automation.LikeKey = likeKey;
+
+        Console.Write($"Разрешить лайк через кнопку? (сейчас: {(automation.AllowLikeButton ? "да" : "нет")}, y/n): ");
+        var likeButton = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (likeButton is "y" or "yes" or "д" or "да") automation.AllowLikeButton = true;
+        if (likeButton is "n" or "no" or "н" or "нет") automation.AllowLikeButton = false;
+
+        Console.Write($"Разрешить лайк через клавишу L? (сейчас: {(automation.AllowLikeKey ? "да" : "нет")}, y/n): ");
+        var likeKeyMode = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (likeKeyMode is "y" or "yes" or "д" or "да") automation.AllowLikeKey = true;
+        if (likeKeyMode is "n" or "no" or "н" or "нет") automation.AllowLikeKey = false;
+
+        if (!automation.AllowLikeButton && !automation.AllowLikeKey)
+            automation.AllowLikeKey = true;
     }
 
     private async Task RunAutomationAsync()
@@ -159,10 +181,15 @@ internal sealed class YandexControlPanel(string configPath)
         if (!cfg.AutomationConfigured)
         {
             Console.WriteLine("Настройки автоматизации ещё не сохранены. Заполняем...");
-            PromptAutomation(cfg.Automation);
+            var firstProfile = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
+            PromptAutomation(firstProfile);
+            SaveProfileAutomation(cfg, cfg.Browser.ProfileName, firstProfile);
+            cfg.Automation = firstProfile;
             cfg.AutomationConfigured = true;
             await SaveConfigAsync(cfg);
         }
+
+        cfg.Automation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
 
         var launchUserDataDir = CreateFreshUserDataDir(cfg);
 
@@ -208,6 +235,7 @@ internal sealed class YandexControlPanel(string configPath)
             while (!cts.IsCancellationRequested)
             {
                 cfg = LoadConfig();
+                cfg.Automation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
                 if (DateTime.UtcNow >= startedAt.AddMinutes(Math.Max(1, cfg.Automation.WorkDurationMinutes)))
                 {
                     Console.WriteLine("Время работы вышло.");
@@ -229,8 +257,8 @@ internal sealed class YandexControlPanel(string configPath)
                 if (cts.IsCancellationRequested)
                     break;
 
-                await page.Keyboard.PressAsync(cfg.Automation.ScrollKey);
-                Console.WriteLine($"Листание: {cfg.Automation.ScrollKey}");
+                await page.ClickAsync(cfg.Automation.ScrollSelector);
+                Console.WriteLine($"Листание кликом: {cfg.Automation.ScrollSelector}");
             }
 
             cts.Cancel();
@@ -318,8 +346,7 @@ internal sealed class YandexControlPanel(string configPath)
             switch (cmd)
             {
                 case "like":
-                    await page.Keyboard.PressAsync(cfg.LikeKey);
-                    Console.WriteLine($"Команда like: {cfg.LikeKey}");
+                    await PerformLikeAsync(page, cfg, "Команда like");
                     break;
                 case "stop":
                     cts.Cancel();
@@ -341,9 +368,80 @@ internal sealed class YandexControlPanel(string configPath)
 
         while (state.TryDequeueDueLike(DateTime.UtcNow, out _))
         {
-            await page.Keyboard.PressAsync(cfg.LikeKey);
-            Console.WriteLine($"Плановый лайк: {cfg.LikeKey}");
+            await PerformLikeAsync(page, cfg, "Плановый лайк");
         }
+    }
+
+    private static async Task PerformLikeAsync(IPage page, AutomationConfig cfg, string source)
+    {
+        var modes = new List<string>();
+        if (cfg.AllowLikeButton && !string.IsNullOrWhiteSpace(cfg.LikeButtonSelector)) modes.Add("button");
+        if (cfg.AllowLikeKey && !string.IsNullOrWhiteSpace(cfg.LikeKey)) modes.Add("key");
+        if (modes.Count == 0)
+        {
+            Console.WriteLine($"{source}: нет доступного способа лайка");
+            return;
+        }
+
+        var selected = modes[Random.Shared.Next(modes.Count)];
+        if (selected == "button")
+        {
+            await page.ClickAsync(cfg.LikeButtonSelector);
+            Console.WriteLine($"{source}: кнопка ({cfg.LikeButtonSelector})");
+        }
+        else
+        {
+            await page.Keyboard.PressAsync(cfg.LikeKey);
+            Console.WriteLine($"{source}: клавиша ({cfg.LikeKey})");
+        }
+    }
+
+    private AutomationConfig LoadProfileAutomation(AppConfig cfg, string profileName, AutomationConfig fallback)
+    {
+        var path = GetProfileSettingsPath(cfg, profileName);
+        try
+        {
+            if (!File.Exists(path))
+                return CloneAutomation(fallback);
+
+            var json = File.ReadAllText(path);
+            return JsonSerializer.Deserialize<AutomationConfig>(json, _json) ?? CloneAutomation(fallback);
+        }
+        catch
+        {
+            return CloneAutomation(fallback);
+        }
+    }
+
+    private void SaveProfileAutomation(AppConfig cfg, string profileName, AutomationConfig automation)
+    {
+        var path = GetProfileSettingsPath(cfg, profileName);
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        File.WriteAllText(path, JsonSerializer.Serialize(automation, _json));
+    }
+
+    private static string GetProfileSettingsPath(AppConfig cfg, string profileName)
+    {
+        var safeName = string.Join("_", profileName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        var dir = Path.Combine(cfg.Browser.ProfilesRoot, "profile-settings");
+        return Path.Combine(dir, $"{safeName}.json");
+    }
+
+    private static AutomationConfig CloneAutomation(AutomationConfig source)
+    {
+        return new AutomationConfig
+        {
+            WorkDurationMinutes = source.WorkDurationMinutes,
+            ScrollDelayMinSeconds = source.ScrollDelayMinSeconds,
+            ScrollDelayMaxSeconds = source.ScrollDelayMaxSeconds,
+            ScrollSelector = source.ScrollSelector,
+            LikesPerPeriod = source.LikesPerPeriod,
+            LikePeriodMinutes = source.LikePeriodMinutes,
+            LikeKey = source.LikeKey,
+            LikeButtonSelector = source.LikeButtonSelector,
+            AllowLikeButton = source.AllowLikeButton,
+            AllowLikeKey = source.AllowLikeKey
+        };
     }
 }
 
@@ -372,10 +470,13 @@ internal sealed class AutomationConfig
     public int WorkDurationMinutes { get; set; } = 60;
     public int ScrollDelayMinSeconds { get; set; } = 3;
     public int ScrollDelayMaxSeconds { get; set; } = 12;
-    public string ScrollKey { get; set; } = "ArrowDown";
+    public string ScrollSelector { get; set; } = "button[data-e2e='arrow-right']";
     public int LikesPerPeriod { get; set; } = 2;
     public int LikePeriodMinutes { get; set; } = 10;
     public string LikeKey { get; set; } = "KeyL";
+    public string LikeButtonSelector { get; set; } = "button[data-e2e='like-icon']";
+    public bool AllowLikeButton { get; set; } = true;
+    public bool AllowLikeKey { get; set; } = true;
 }
 
 internal sealed class LikeScheduleState

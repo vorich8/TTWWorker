@@ -10,10 +10,13 @@
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
     "scrollDelayMaxSeconds": 12,
-    "scrollKey": "ArrowDown",
+    "scrollSelector": "button[data-e2e='arrow-right']",
     "likesPerPeriod": 2,
     "likePeriodMinutes": 10,
-    "likeKey": "KeyL"
+    "likeKey": "KeyL",
+    "likeButtonSelector": "button[data-e2e='like-icon']",
+    "allowLikeButton": true,
+    "allowLikeKey": true
   },
   "automationConfigured": true
 }

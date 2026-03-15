@@ -2,12 +2,13 @@
 
 Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright**.
 
-Теперь запуск всегда идёт в полностью автоматизированном режиме с **новым пустым профилем на каждый старт**:
-- бот сам запускает `browser.exe`;
-- создаёт свежий `userDataDir` в `profilesRoot/runtime-fresh/...`;
-- открывает TikTok и выполняет автодействия через Playwright.
+## Что сделано
 
-Основной профиль пользователя не используется.
+- Полностью автоматизированный запуск браузера.
+- На каждый старт создаётся новый чистый профиль (`profilesRoot/runtime-fresh/...`).
+- **Настройки действий хранятся по профилям** в `profilesRoot/profile-settings/<profile>.json`.
+- Лайк выполняется рандомно: **через кнопку лайка или через клавишу `L`** (каждый раз случайно).
+- Листание выполняется **только кликом по кнопке-стрелке** (через `scrollSelector`).
 
 ## Запуск
 
@@ -19,7 +20,7 @@ dotnet run --project TTWWorker -- scenario.json
 ## Пункт управления
 
 - `1` — запустить автоматизацию
-- `2` — настроить `scenario.json`
+- `2` — настроить `scenario.json` + действия для выбранного профиля
 - `3` — показать текущий JSON
 - `0` — выход
 
@@ -38,10 +39,13 @@ dotnet run --project TTWWorker -- scenario.json
     "workDurationMinutes": 60,
     "scrollDelayMinSeconds": 3,
     "scrollDelayMaxSeconds": 12,
-    "scrollKey": "ArrowDown",
+    "scrollSelector": "button[data-e2e='arrow-right']",
     "likesPerPeriod": 2,
     "likePeriodMinutes": 10,
-    "likeKey": "KeyL"
+    "likeKey": "KeyL",
+    "likeButtonSelector": "button[data-e2e='like-icon']",
+    "allowLikeButton": true,
+    "allowLikeKey": true
   },
   "automationConfigured": true
 }
@@ -49,6 +53,6 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Важно
 
-1. На каждый запуск создаётся новый чистый профиль, поэтому расширения/логины из основного браузера не подхватываются.
-2. Для установки/работы расширений отключены Playwright-флаги `--enable-automation` и `--disable-extensions`.
-3. Во время работы команды: `like`, `stop`.
+1. Для скролла укажите корректный `scrollSelector` (кнопка-стрелка справа ниже середины).
+2. Для лайка можно включить оба режима (`allowLikeButton` и `allowLikeKey`) — бот будет случайно выбирать между ними.
+3. Команды во время работы: `like`, `stop`.
