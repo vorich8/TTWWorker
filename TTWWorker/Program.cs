@@ -91,18 +91,6 @@ internal sealed class YandexControlPanel(string configPath)
         if (!string.IsNullOrWhiteSpace(root))
             cfg.Browser.ProfilesRoot = root;
 
-        Console.Write($"Использовать системный User Data? (сейчас: {(cfg.Browser.UseSystemUserData ? "да" : "нет")}, y/n): ");
-        var useSystem = Console.ReadLine()?.Trim().ToLowerInvariant();
-        if (useSystem is "y" or "yes" or "д" or "да")
-            cfg.Browser.UseSystemUserData = true;
-        else if (useSystem is "n" or "no" or "н" or "нет")
-            cfg.Browser.UseSystemUserData = false;
-
-        Console.Write($"Системная папка User Data (сейчас: {cfg.Browser.SystemUserDataDir}): ");
-        var systemUserData = Console.ReadLine()?.Trim();
-        if (!string.IsNullOrWhiteSpace(systemUserData))
-            cfg.Browser.SystemUserDataDir = systemUserData;
-
         Console.Write($"Имя профиля (сейчас: {cfg.Browser.ProfileName}): ");
         var profile = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(profile))
@@ -176,23 +164,16 @@ internal sealed class YandexControlPanel(string configPath)
             await SaveConfigAsync(cfg);
         }
 
-        var launchUserDataDir = cfg.Browser.UseSystemUserData
-            ? cfg.Browser.SystemUserDataDir
-            : cfg.Browser.ProfilesRoot;
+        var launchUserDataDir = CreateFreshUserDataDir(cfg);
 
-        var launchProfileDir = cfg.Browser.ProfileName;
-        Directory.CreateDirectory(Path.Combine(launchUserDataDir, launchProfileDir));
-
-        Console.WriteLine("Запускаю Яндекс.Браузер...");
+        Console.WriteLine("Запускаю Яндекс.Браузер с новым пустым профилем...");
         Console.WriteLine($"User Data: {launchUserDataDir}");
-        Console.WriteLine($"Profile directory: {launchProfileDir}");
 
         var launchArgs = new List<string>
         {
             "--new-window",
             "--no-first-run",
-            "--no-default-browser-check",
-            $"--profile-directory={cfg.Browser.ProfileName}"
+            "--no-default-browser-check"
         };
 
         try
@@ -257,64 +238,38 @@ internal sealed class YandexControlPanel(string configPath)
 
             if (!string.IsNullOrWhiteSpace(launch.TempClonePath))
                 TryDeleteDirectory(launch.TempClonePath);
+
+            TryDeleteDirectory(launchUserDataDir);
         }
         catch (PlaywrightException ex)
         {
             Console.WriteLine("Ошибка Playwright:");
             Console.WriteLine(ex.Message);
+            TryDeleteDirectory(launchUserDataDir);
         }
         catch (Exception ex)
         {
             Console.WriteLine("Ошибка запуска автоматизации:");
             Console.WriteLine(ex.Message);
+            TryDeleteDirectory(launchUserDataDir);
         }
     }
 
 
+    private static string CreateFreshUserDataDir(AppConfig cfg)
+    {
+        var root = Path.Combine(cfg.Browser.ProfilesRoot, "runtime-fresh");
+        Directory.CreateDirectory(root);
+
+        var dir = Path.Combine(root, $"profile-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
+        Directory.CreateDirectory(dir);
+        return dir;
+    }
+
     private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string launchUserDataDir, IReadOnlyList<string> launchArgs)
     {
-        if (cfg.Browser.UseSystemUserData)
-        {
-            // Для системного User Data профиль часто уже занят основным окном браузера.
-            // Сразу используем временную копию, чтобы избежать мгновенного закрытия процесса.
-            Console.WriteLine("Используется системный User Data: запускаю через временную копию профиля...");
-            var cloneRoot = CreateProfileClone(cfg);
-
-            try
-            {
-                var clonedContext = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
-                return new LaunchResult(clonedContext, cloneRoot);
-            }
-            catch
-            {
-                TryDeleteDirectory(cloneRoot);
-                throw;
-            }
-        }
-
-        try
-        {
-            var context = await LaunchContextAsync(playwright, cfg, launchUserDataDir, launchArgs);
-            return new LaunchResult(context, null);
-        }
-        catch (PlaywrightException ex)
-        {
-            Console.WriteLine("Основной запуск не удался.");
-            Console.WriteLine("Пробую временную копию профиля...");
-            Console.WriteLine($"Причина: {ex.Message}");
-
-            var cloneRoot = CreateProfileClone(cfg);
-            try
-            {
-                var context = await LaunchContextAsync(playwright, cfg, cloneRoot, launchArgs);
-                return new LaunchResult(context, cloneRoot);
-            }
-            catch
-            {
-                TryDeleteDirectory(cloneRoot);
-                throw;
-            }
-        }
+        var context = await LaunchContextAsync(playwright, cfg, launchUserDataDir, launchArgs);
+        return new LaunchResult(context, null);
     }
 
     private async Task<IBrowserContext> LaunchContextAsync(IPlaywright playwright, AppConfig cfg, string userDataDir, IReadOnlyList<string> launchArgs)
@@ -332,48 +287,6 @@ internal sealed class YandexControlPanel(string configPath)
             });
     }
 
-    private string CreateProfileClone(AppConfig cfg)
-    {
-        var cloneRoot = Path.Combine(cfg.Browser.ProfilesRoot, "runtime-clones", $"clone-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(cloneRoot);
-
-        var sourceProfileDir = Path.Combine(cfg.Browser.SystemUserDataDir, cfg.Browser.ProfileName);
-        var targetProfileDir = Path.Combine(cloneRoot, cfg.Browser.ProfileName);
-        CopyDirectory(sourceProfileDir, targetProfileDir);
-
-        var localState = Path.Combine(cfg.Browser.SystemUserDataDir, "Local State");
-        if (File.Exists(localState))
-            File.Copy(localState, Path.Combine(cloneRoot, "Local State"), overwrite: true);
-
-        return cloneRoot;
-    }
-
-    private static void CopyDirectory(string source, string target)
-    {
-        if (!Directory.Exists(source))
-            return;
-
-        Directory.CreateDirectory(target);
-
-        foreach (var file in Directory.EnumerateFiles(source))
-        {
-            var name = Path.GetFileName(file);
-            if (name.Contains("lock", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            var dest = Path.Combine(target, name);
-            File.Copy(file, dest, overwrite: true);
-        }
-
-        foreach (var dir in Directory.EnumerateDirectories(source))
-        {
-            var name = Path.GetFileName(dir);
-            if (name.Contains("Crashpad", StringComparison.OrdinalIgnoreCase))
-                continue;
-
-            CopyDirectory(dir, Path.Combine(target, name));
-        }
-    }
 
     private static void TryDeleteDirectory(string path)
     {
@@ -451,8 +364,6 @@ internal sealed class BrowserConfig
     public string ExecutablePath { get; set; } = @"C:\Program Files (x86)\Yandex\YandexBrowser\Application\browser.exe";
     public string ProfilesRoot { get; set; } = "managed-profiles";
     public string ProfileName { get; set; } = "Profile 1";
-    public bool UseSystemUserData { get; set; }
-    public string SystemUserDataDir { get; set; } = @"C:\Users\Администратор\AppData\Local\Yandex\YandexBrowser\User Data";
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36";
 }
 

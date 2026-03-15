@@ -2,10 +2,12 @@
 
 Консольная автоматизация TikTok через **Яндекс.Браузер + Playwright**.
 
-Теперь проект работает только в полностью автоматизированном режиме (как AutoKBWW):
+Теперь запуск всегда идёт в полностью автоматизированном режиме с **новым пустым профилем на каждый старт**:
 - бот сам запускает `browser.exe`;
-- открывает TikTok;
-- выполняет автодействия через Playwright.
+- создаёт свежий `userDataDir` в `profilesRoot/runtime-fresh/...`;
+- открывает TikTok и выполняет автодействия через Playwright.
+
+Основной профиль пользователя не используется.
 
 ## Запуск
 
@@ -29,9 +31,7 @@ dotnet run --project TTWWorker -- scenario.json
   "browser": {
     "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "profilesRoot": "managed-profiles",
-    "profileName": "Default",
-    "useSystemUserData": true,
-    "systemUserDataDir": "C:/Users/Администратор/AppData/Local/Yandex/YandexBrowser/User Data",
+    "profileName": "Profile 1",
     "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
   },
   "automation": {
@@ -49,6 +49,6 @@ dotnet run --project TTWWorker -- scenario.json
 
 ## Важно
 
-1. Если системный профиль занят, бот автоматически запускается через временный клон профиля.
+1. На каждый запуск создаётся новый чистый профиль, поэтому расширения/логины из основного браузера не подхватываются.
 2. Для установки/работы расширений отключены Playwright-флаги `--enable-automation` и `--disable-extensions`.
 3. Во время работы команды: `like`, `stop`.
