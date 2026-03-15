@@ -191,9 +191,20 @@ internal sealed class YandexControlPanel(string configPath)
 
         cfg.Automation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
 
-        var launchUserDataDir = CreateFreshUserDataDir(cfg);
+        var launchUserDataDir = GetOrCreateProfileUserDataDir(cfg, cfg.Browser.ProfileName);
 
-        Console.WriteLine("Запускаю Яндекс.Браузер с новым пустым профилем...");
+        if (!HasProfileAutomationSettings(cfg, cfg.Browser.ProfileName))
+        {
+            Console.WriteLine($"Для профиля '{cfg.Browser.ProfileName}' ещё нет настроек действий. Заполняем...");
+            var firstProfile = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
+            PromptAutomation(firstProfile);
+            SaveProfileAutomation(cfg, cfg.Browser.ProfileName, firstProfile);
+            cfg.Automation = firstProfile;
+            cfg.AutomationConfigured = true;
+            await SaveConfigAsync(cfg);
+        }
+
+        Console.WriteLine("Запускаю Яндекс.Браузер с профилем (сессия сохраняется)...");
         Console.WriteLine($"User Data: {launchUserDataDir}");
 
         var launchArgs = new List<string>
@@ -266,33 +277,30 @@ internal sealed class YandexControlPanel(string configPath)
 
             if (!string.IsNullOrWhiteSpace(launch.TempClonePath))
                 TryDeleteDirectory(launch.TempClonePath);
-
-            TryDeleteDirectory(launchUserDataDir);
         }
         catch (PlaywrightException ex)
         {
             Console.WriteLine("Ошибка Playwright:");
             Console.WriteLine(ex.Message);
-            TryDeleteDirectory(launchUserDataDir);
         }
         catch (Exception ex)
         {
             Console.WriteLine("Ошибка запуска автоматизации:");
             Console.WriteLine(ex.Message);
-            TryDeleteDirectory(launchUserDataDir);
         }
     }
 
 
-    private static string CreateFreshUserDataDir(AppConfig cfg)
+    private static string GetOrCreateProfileUserDataDir(AppConfig cfg, string profileName)
     {
-        var root = Path.Combine(cfg.Browser.ProfilesRoot, "runtime-fresh");
+        var safeName = string.Join("_", profileName.Split(Path.GetInvalidFileNameChars(), StringSplitOptions.RemoveEmptyEntries));
+        var root = Path.Combine(cfg.Browser.ProfilesRoot, "runtime-profiles", safeName);
         Directory.CreateDirectory(root);
-
-        var dir = Path.Combine(root, $"profile-{DateTime.UtcNow:yyyyMMdd-HHmmss}-{Guid.NewGuid():N}");
-        Directory.CreateDirectory(dir);
-        return dir;
+        return root;
     }
+
+    private static bool HasProfileAutomationSettings(AppConfig cfg, string profileName)
+        => File.Exists(GetProfileSettingsPath(cfg, profileName));
 
     private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string launchUserDataDir, IReadOnlyList<string> launchArgs)
     {
