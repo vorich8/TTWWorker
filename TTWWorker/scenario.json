@@ -1,0 +1,26 @@
+{
+  "startUrl": "https://www.tiktok.com/foryou",
+  "browser": {
+    "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
+    "profilesRoot": "managed-profiles",
+    "profileName": "Profile 1",
+    "userAgent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36",
+    "useCustomUserAgent": false
+  },
+  "automation": {
+    "workDurationMinutes": 60,
+    "scrollDelayMinSeconds": 3,
+    "scrollDelayMaxSeconds": 12,
+    "scrollSelector": "button[data-e2e='arrow-right']",
+    "likesPerPeriod": 2,
+    "likePeriodMinutes": 10,
+    "likeKey": "KeyL",
+    "likeButtonSelector": "button[data-e2e='like-icon']",
+    "allowLikeButton": true,
+    "allowLikeKey": true,
+    "manualPreparationSeconds": 20,
+    "skipScrollChancePercent": 25,
+    "humanizeMouseMove": true
+  },
+  "automationConfigured": true
+}
