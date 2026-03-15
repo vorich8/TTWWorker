@@ -178,31 +178,9 @@ internal sealed class YandexControlPanel(string configPath)
             return;
         }
 
-        if (!cfg.AutomationConfigured)
-        {
-            Console.WriteLine("Настройки автоматизации ещё не сохранены. Заполняем...");
-            var firstProfile = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
-            PromptAutomation(firstProfile);
-            SaveProfileAutomation(cfg, cfg.Browser.ProfileName, firstProfile);
-            cfg.Automation = firstProfile;
-            cfg.AutomationConfigured = true;
-            await SaveConfigAsync(cfg);
-        }
-
-        cfg.Automation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
+        cfg.Automation = await EnsureProfileAutomationConfiguredAsync(cfg);
 
         var launchUserDataDir = GetOrCreateProfileUserDataDir(cfg, cfg.Browser.ProfileName);
-
-        if (!HasProfileAutomationSettings(cfg, cfg.Browser.ProfileName))
-        {
-            Console.WriteLine($"Для профиля '{cfg.Browser.ProfileName}' ещё нет настроек действий. Заполняем...");
-            var firstProfile = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
-            PromptAutomation(firstProfile);
-            SaveProfileAutomation(cfg, cfg.Browser.ProfileName, firstProfile);
-            cfg.Automation = firstProfile;
-            cfg.AutomationConfigured = true;
-            await SaveConfigAsync(cfg);
-        }
 
         Console.WriteLine("Запускаю Яндекс.Браузер с профилем (сессия сохраняется)...");
         Console.WriteLine($"User Data: {launchUserDataDir}");
@@ -301,6 +279,23 @@ internal sealed class YandexControlPanel(string configPath)
 
     private static bool HasProfileAutomationSettings(AppConfig cfg, string profileName)
         => File.Exists(GetProfileSettingsPath(cfg, profileName));
+
+    private async Task<AutomationConfig> EnsureProfileAutomationConfiguredAsync(AppConfig cfg)
+    {
+        var profileName = cfg.Browser.ProfileName;
+        var profileAutomation = LoadProfileAutomation(cfg, profileName, cfg.Automation);
+
+        if (!HasProfileAutomationSettings(cfg, profileName))
+        {
+            Console.WriteLine($"Для профиля '{profileName}' ещё нет настроек действий. Заполняем...");
+            PromptAutomation(profileAutomation);
+            SaveProfileAutomation(cfg, profileName, profileAutomation);
+            cfg.AutomationConfigured = true;
+            await SaveConfigAsync(cfg);
+        }
+
+        return profileAutomation;
+    }
 
     private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string launchUserDataDir, IReadOnlyList<string> launchArgs)
     {
