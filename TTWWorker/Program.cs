@@ -178,7 +178,8 @@ internal sealed class YandexControlPanel(string configPath)
             return;
         }
 
-        cfg.Automation = await EnsureProfileAutomationConfiguredAsync(cfg);
+        var profileHasSavedSettings = HasProfileAutomationSettings(cfg, cfg.Browser.ProfileName);
+        cfg.Automation = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
 
         var launchUserDataDir = GetOrCreateProfileUserDataDir(cfg, cfg.Browser.ProfileName);
 
@@ -207,6 +208,18 @@ internal sealed class YandexControlPanel(string configPath)
             foreach (var existing in context.Pages.Where(p => p != page && p.Url.Equals("about:blank", StringComparison.OrdinalIgnoreCase)).ToList())
             {
                 await existing.CloseAsync();
+            }
+
+            if (!profileHasSavedSettings)
+            {
+                Console.WriteLine($"Для профиля '{cfg.Browser.ProfileName}' ещё нет настроек действий.");
+                Console.WriteLine("Заполните настройки сейчас (браузер уже открыт).");
+                var firstProfile = LoadProfileAutomation(cfg, cfg.Browser.ProfileName, cfg.Automation);
+                PromptAutomation(firstProfile);
+                SaveProfileAutomation(cfg, cfg.Browser.ProfileName, firstProfile);
+                cfg.Automation = firstProfile;
+                cfg.AutomationConfigured = true;
+                await SaveConfigAsync(cfg);
             }
 
             Console.WriteLine("TikTok открыт. Проверьте аккаунт/VPN и нажмите Enter для старта.");
@@ -279,23 +292,6 @@ internal sealed class YandexControlPanel(string configPath)
 
     private static bool HasProfileAutomationSettings(AppConfig cfg, string profileName)
         => File.Exists(GetProfileSettingsPath(cfg, profileName));
-
-    private async Task<AutomationConfig> EnsureProfileAutomationConfiguredAsync(AppConfig cfg)
-    {
-        var profileName = cfg.Browser.ProfileName;
-        var profileAutomation = LoadProfileAutomation(cfg, profileName, cfg.Automation);
-
-        if (!HasProfileAutomationSettings(cfg, profileName))
-        {
-            Console.WriteLine($"Для профиля '{profileName}' ещё нет настроек действий. Заполняем...");
-            PromptAutomation(profileAutomation);
-            SaveProfileAutomation(cfg, profileName, profileAutomation);
-            cfg.AutomationConfigured = true;
-            await SaveConfigAsync(cfg);
-        }
-
-        return profileAutomation;
-    }
 
     private async Task<LaunchResult> LaunchContextWithFallbackAsync(IPlaywright playwright, AppConfig cfg, string launchUserDataDir, IReadOnlyList<string> launchArgs)
     {
