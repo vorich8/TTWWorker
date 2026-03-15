@@ -4,7 +4,7 @@
 
 ## Что сделано
 
-- Полностью автоматизированный запуск браузера.
+- Менее агрессивный автоматический режим: пауза на ручной вход, микродвижения мыши и случайные пропуски скролла для более «живого» поведения.
 - Сессия сохраняется за профилем в `profilesRoot/runtime-profiles/<profileName>`.
 - **Настройки действий хранятся по профилям** в `profilesRoot/profile-settings/<profile>.json`.
 - Лайк выполняется рандомно: **через кнопку лайка или через клавишу `L`** (каждый раз случайно).
@@ -33,7 +33,8 @@ dotnet run --project TTWWorker -- scenario.json
     "executablePath": "C:/Program Files (x86)/Yandex/YandexBrowser/Application/browser.exe",
     "profilesRoot": "managed-profiles",
     "profileName": "Profile 1",
-    "userAgent": "Mozilla/5.0 (...) YaBrowser/..."
+    "userAgent": "Mozilla/5.0 (...) YaBrowser/...",
+    "useCustomUserAgent": false
   },
   "automation": {
     "workDurationMinutes": 60,
@@ -45,7 +46,10 @@ dotnet run --project TTWWorker -- scenario.json
     "likeKey": "KeyL",
     "likeButtonSelector": "button[data-e2e='like-icon']",
     "allowLikeButton": true,
-    "allowLikeKey": true
+    "allowLikeKey": true,
+    "manualPreparationSeconds": 20,
+    "skipScrollChancePercent": 25,
+    "humanizeMouseMove": true
   },
   "automationConfigured": true
 }
@@ -55,4 +59,7 @@ dotnet run --project TTWWorker -- scenario.json
 
 1. Для скролла укажите корректный `scrollSelector` (кнопка-стрелка справа ниже середины).
 2. Для лайка можно включить оба режима (`allowLikeButton` и `allowLikeKey`) — бот будет случайно выбирать между ними.
-3. Команды во время работы: `like`, `stop`.
+3. Если TikTok хуже пускает в аккаунт, оставьте `browser.useCustomUserAgent = false` (браузерный UA по умолчанию).
+4. `manualPreparationSeconds` — пауза после открытия TikTok для ручного входа.
+5. `skipScrollChancePercent` и `humanizeMouseMove` делают действия менее роботизированными.
+6. Команды во время работы: `like`, `stop`.

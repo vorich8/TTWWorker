@@ -101,6 +101,11 @@ internal sealed class YandexControlPanel(string configPath)
         if (!string.IsNullOrWhiteSpace(userAgent))
             cfg.Browser.UserAgent = userAgent;
 
+        Console.Write($"Использовать кастомный User-Agent? (сейчас: {(cfg.Browser.UseCustomUserAgent ? "да" : "нет")}, y/n): ");
+        var useCustomUa = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (useCustomUa is "y" or "yes" or "д" or "да") cfg.Browser.UseCustomUserAgent = true;
+        if (useCustomUa is "n" or "no" or "н" or "нет") cfg.Browser.UseCustomUserAgent = false;
+
         Console.Write($"Start URL (сейчас: {cfg.StartUrl}): ");
         var url = Console.ReadLine()?.Trim();
         if (!string.IsNullOrWhiteSpace(url))
@@ -164,6 +169,19 @@ internal sealed class YandexControlPanel(string configPath)
         if (likeKeyMode is "y" or "yes" or "д" or "да") automation.AllowLikeKey = true;
         if (likeKeyMode is "n" or "no" or "н" or "нет") automation.AllowLikeKey = false;
 
+        Console.Write($"Пауза на ручной вход перед автостартом, сек (сейчас: {automation.ManualPreparationSeconds}): ");
+        if (int.TryParse(Console.ReadLine(), out var prepSec) && prepSec >= 0)
+            automation.ManualPreparationSeconds = prepSec;
+
+        Console.Write($"Шанс пропустить прокрутку, % (сейчас: {automation.SkipScrollChancePercent}): ");
+        if (int.TryParse(Console.ReadLine(), out var skipPercent) && skipPercent >= 0 && skipPercent <= 100)
+            automation.SkipScrollChancePercent = skipPercent;
+
+        Console.Write($"Делать микродвижение мыши перед действиями? (сейчас: {(automation.HumanizeMouseMove ? "да" : "нет")}, y/n): ");
+        var mouseMove = Console.ReadLine()?.Trim().ToLowerInvariant();
+        if (mouseMove is "y" or "yes" or "д" or "да") automation.HumanizeMouseMove = true;
+        if (mouseMove is "n" or "no" or "н" or "нет") automation.HumanizeMouseMove = false;
+
         if (!automation.AllowLikeButton && !automation.AllowLikeKey)
             automation.AllowLikeKey = true;
     }
@@ -225,6 +243,12 @@ internal sealed class YandexControlPanel(string configPath)
             Console.WriteLine("TikTok открыт. Проверьте аккаунт/VPN и нажмите Enter для старта.");
             Console.ReadLine();
 
+            if (cfg.Automation.ManualPreparationSeconds > 0)
+            {
+                Console.WriteLine($"Ручная пауза {cfg.Automation.ManualPreparationSeconds} сек для логина/проверок...");
+                await page.WaitForTimeoutAsync(cfg.Automation.ManualPreparationSeconds * 1000);
+            }
+
             var queue = new ConcurrentQueue<string>();
             using var cts = new CancellationTokenSource();
             _ = Task.Run(() => ReadCommands(queue, cts.Token), cts.Token);
@@ -259,6 +283,14 @@ internal sealed class YandexControlPanel(string configPath)
                 if (cts.IsCancellationRequested)
                     break;
 
+                var skipRoll = Random.Shared.Next(0, 100);
+                if (skipRoll < cfg.Automation.SkipScrollChancePercent)
+                {
+                    Console.WriteLine("Листание пропущено (пауза для более живого поведения).");
+                    continue;
+                }
+
+                await HumanizeBeforeActionAsync(page, cfg.Automation);
                 await page.ClickAsync(cfg.Automation.ScrollSelector);
                 Console.WriteLine($"Листание кликом: {cfg.Automation.ScrollSelector}");
             }
@@ -310,7 +342,7 @@ internal sealed class YandexControlPanel(string configPath)
                 Channel = null,
                 IgnoreDefaultArgs = new[] { "--enable-automation", "--disable-extensions" },
                 Args = launchArgs,
-                UserAgent = cfg.Browser.UserAgent
+                UserAgent = cfg.Browser.UseCustomUserAgent ? cfg.Browser.UserAgent : null
             });
     }
 
@@ -385,14 +417,29 @@ internal sealed class YandexControlPanel(string configPath)
         var selected = modes[Random.Shared.Next(modes.Count)];
         if (selected == "button")
         {
+            await HumanizeBeforeActionAsync(page, cfg);
             await page.ClickAsync(cfg.LikeButtonSelector);
             Console.WriteLine($"{source}: кнопка ({cfg.LikeButtonSelector})");
         }
         else
         {
+            await HumanizeBeforeActionAsync(page, cfg);
             await page.Keyboard.PressAsync(cfg.LikeKey);
             Console.WriteLine($"{source}: клавиша ({cfg.LikeKey})");
         }
+    }
+
+    private static async Task HumanizeBeforeActionAsync(IPage page, AutomationConfig cfg)
+    {
+        if (cfg.HumanizeMouseMove)
+        {
+            var x = Random.Shared.Next(420, 980);
+            var y = Random.Shared.Next(280, 620);
+            await page.Mouse.MoveAsync(x, y, new MouseMoveOptions { Steps = Random.Shared.Next(4, 11) });
+        }
+
+        var jitterMs = Random.Shared.Next(120, 550);
+        await page.WaitForTimeoutAsync(jitterMs);
     }
 
     private AutomationConfig LoadProfileAutomation(AppConfig cfg, string profileName, AutomationConfig fallback)
@@ -439,7 +486,10 @@ internal sealed class YandexControlPanel(string configPath)
             LikeKey = source.LikeKey,
             LikeButtonSelector = source.LikeButtonSelector,
             AllowLikeButton = source.AllowLikeButton,
-            AllowLikeKey = source.AllowLikeKey
+            AllowLikeKey = source.AllowLikeKey,
+            ManualPreparationSeconds = source.ManualPreparationSeconds,
+            SkipScrollChancePercent = source.SkipScrollChancePercent,
+            HumanizeMouseMove = source.HumanizeMouseMove
         };
     }
 }
@@ -462,6 +512,7 @@ internal sealed class BrowserConfig
     public string ProfilesRoot { get; set; } = "managed-profiles";
     public string ProfileName { get; set; } = "Profile 1";
     public string UserAgent { get; set; } = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 YaBrowser/24.4.0.0 Safari/537.36";
+    public bool UseCustomUserAgent { get; set; } = false;
 }
 
 internal sealed class AutomationConfig
@@ -476,6 +527,9 @@ internal sealed class AutomationConfig
     public string LikeButtonSelector { get; set; } = "button[data-e2e='like-icon']";
     public bool AllowLikeButton { get; set; } = true;
     public bool AllowLikeKey { get; set; } = true;
+    public int ManualPreparationSeconds { get; set; } = 20;
+    public int SkipScrollChancePercent { get; set; } = 25;
+    public bool HumanizeMouseMove { get; set; } = true;
 }
 
 internal sealed class LikeScheduleState
